@@ -10,6 +10,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from functools import lru_cache
 from html import escape
+from pathlib import Path
 from typing import Any
 from unicodedata import normalize
 from zoneinfo import ZoneInfo
@@ -17,7 +18,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from config import ensure_runtime_dirs, settings
+from config import ROOT_DIR, ensure_runtime_dirs, settings
 from src.dashboard.data import read_sql_frame
 from src.db.session import init_db, sqlite_db_path
 from src.domain import scoring as score_logic
@@ -28,9 +29,33 @@ from src.integrations.x_api import XCredentials, XPostError, publish_x_posts
 
 
 ensure_runtime_dirs()
-init_db()
+if not settings.public_viewer_mode:
+    init_db()
 DB_PATH = sqlite_db_path()
 log = logging.getLogger(__name__)
+
+
+def _rooted_path(value: str) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else ROOT_DIR / path
+
+
+def _public_snapshot_base_date() -> str | None:
+    if not settings.public_viewer_mode:
+        return None
+    metadata_path = _rooted_path(settings.public_snapshot_metadata)
+    try:
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    base_date = str(payload.get("base_date") or "").strip()
+    if not base_date:
+        return None
+    try:
+        datetime.fromisoformat(base_date)
+    except ValueError:
+        return None
+    return base_date
 
 
 def dashboard_base_date():
@@ -39,6 +64,9 @@ def dashboard_base_date():
             return datetime.fromisoformat(settings.dashboard_base_date).date()
         except ValueError:
             log.warning("DASHBOARD_BASE_DATE invalido: %s", settings.dashboard_base_date)
+    public_base_date = _public_snapshot_base_date()
+    if public_base_date:
+        return datetime.fromisoformat(public_base_date).date()
     return datetime.now(ZoneInfo(settings.app_timezone)).date()
 
 
@@ -62,6 +90,8 @@ def ensure_x_publish_unlocked() -> bool:
 
 
 def render_x_publish_unlock_control() -> None:
+    if settings.public_viewer_mode:
+        return
     if is_x_publish_unlocked():
         return
 
@@ -1390,6 +1420,8 @@ def maybe_auto_publish_x(
     over_limit: list[XPostDraft],
     key_prefix: str,
 ) -> None:
+    if settings.public_viewer_mode:
+        return
     if not settings.x_auto_publish_enabled:
         return
     if missing:
@@ -1428,6 +1460,8 @@ def render_x_single_publish_controls(
 
 
 def render_x_publish_controls(rows: pd.DataFrame, key_prefix: str = "best_bets") -> None:
+    if settings.public_viewer_mode:
+        return
     if not is_x_publish_unlocked():
         return
 

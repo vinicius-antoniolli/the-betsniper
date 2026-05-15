@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-05-15T15:35:38-03:00",
+  "base_date": "2026-05-15",
+  "days": 2,
+  "dates": [
+    "2026-05-15",
+    "2026-05-16"
+  ],
+  "source_db": "data/betsniper.db",
+  "output_db": "public_data/betsniper_public.db",
+  "output_size_bytes": 35274752,
+  "counts": {
+    "matches": 9,
+    "analysis_results": 27,
+    "player_lineups": 0,
+    "odds_snapshots": 1135,
+    "team_stats": 279,
+    "player_stats": 6008
+  }
+}

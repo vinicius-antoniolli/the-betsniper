@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     app_db_url: str = Field(default="sqlite:///data/betsniper.db", alias="APP_DB_URL")
     app_timezone: str = Field(default="America/Sao_Paulo", alias="APP_TIMEZONE")
     dashboard_base_date: str | None = Field(default=None, alias="DASHBOARD_BASE_DATE")
+    public_viewer_mode: bool = Field(default=False, alias="PUBLIC_VIEWER_MODE")
+    public_snapshot_metadata: str = Field(default="public_data/public_snapshot.json", alias="PUBLIC_SNAPSHOT_METADATA")
 
     football_country: str = Field(default="Brazil", alias="FOOTBALL_COUNTRY")
     espn_league_slug: str = Field(default="bra.1", alias="ESPN_LEAGUE_SLUG")

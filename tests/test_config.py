@@ -16,6 +16,11 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.x_publish_password, "secret")
 
+    def test_public_viewer_mode_reads_env_alias(self) -> None:
+        settings = Settings(_env_file=None, PUBLIC_VIEWER_MODE="true")
+
+        self.assertTrue(settings.public_viewer_mode)
+
 
 if __name__ == "__main__":
     unittest.main()
