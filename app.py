@@ -372,6 +372,11 @@ st.markdown(
       overflow-wrap: anywhere;
     }
 
+    .predictions-table td.predictions-cell-reason {
+      text-align: left;
+      white-space: pre-line;
+    }
+
     .predictions-table th {
       color: rgba(250, 250, 250, 0.72);
       font-weight: 500;
@@ -891,8 +896,18 @@ def clean_reason_column(rows: pd.DataFrame) -> pd.DataFrame:
     return cleaned
 
 
+def has_multiline_reason(rows: pd.DataFrame) -> bool:
+    return "Motivo" in rows.columns and rows["Motivo"].astype(str).str.contains("\n", regex=False).any()
+
+
+def table_row_height(rows: pd.DataFrame) -> int:
+    return 68 if has_multiline_reason(rows) else 35
+
+
 def render_table(rows: pd.DataFrame, height: int = TABLE_5_ROWS_HEIGHT) -> None:
     display = clean_reason_column(rows.copy())
+    row_height = table_row_height(display)
+    height = max(height, dataframe_content_height(display, min_height=height, max_height=520, row_height=row_height))
     column_config = {}
     if "Score" in display.columns:
         display["Score"] = pd.to_numeric(display["Score"], errors="coerce")
@@ -901,18 +916,21 @@ def render_table(rows: pd.DataFrame, height: int = TABLE_5_ROWS_HEIGHT) -> None:
         if odd_column in display.columns:
             display[odd_column] = pd.to_numeric(display[odd_column], errors="coerce")
             column_config[odd_column] = st.column_config.NumberColumn(odd_column, format="%.2f")
+    if "Motivo" in display.columns:
+        column_config["Motivo"] = st.column_config.TextColumn("Motivo", width="large")
     st.dataframe(
         display,
         width="stretch",
         height=height,
         hide_index=True,
         column_config=column_config,
+        row_height=row_height,
     )
 
 
-def dataframe_content_height(rows: pd.DataFrame, min_height: int = 110, max_height: int = 520) -> int:
+def dataframe_content_height(rows: pd.DataFrame, min_height: int = 110, max_height: int = 520, row_height: int = 35) -> int:
     row_count = 0 if rows is None or rows.empty else len(rows)
-    return min(max_height, max(min_height, 38 + (row_count + 1) * 35))
+    return min(max_height, max(min_height, 38 + (row_count + 1) * row_height))
 
 
 def html_display_value(value: object, column: str) -> str:
@@ -963,8 +981,11 @@ def prediction_table_html(
             header_cells.append(f'<th scope="col">{label}</th>')
     body_rows = []
     for _, row in display.iterrows():
-        cells = "".join(f"<td>{escape(str(row.get(column, '')))}</td>" for column in selected)
-        body_rows.append(f"<tr>{cells}</tr>")
+        cells = []
+        for column in selected:
+            cell_class = ' class="predictions-cell-reason"' if column == "Motivo" else ""
+            cells.append(f"<td{cell_class}>{escape(str(row.get(column, '')))}</td>")
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
     table = (
         f'<table class="predictions-table" data-sortable="{1 if sortable else 0}">'
         f"<thead><tr>{''.join(header_cells)}</tr></thead>"
@@ -986,6 +1007,7 @@ def prediction_details_html(summary: str, body: str, open_section: bool = True, 
 
 def render_best_bets_table(rows: pd.DataFrame) -> None:
     display = clean_reason_column(rows.drop(columns=["_target_date", "_source_match_id", "market_key"], errors="ignore").copy())
+    row_height = table_row_height(display)
     column_config = {}
     if "Linha" in display.columns:
         display["Linha"] = pd.to_numeric(display["Linha"], errors="coerce")
@@ -1002,9 +1024,10 @@ def render_best_bets_table(rows: pd.DataFrame) -> None:
     st.dataframe(
         display,
         width="stretch",
-        height=min(520, max(160, 38 + (len(display) + 1) * 35)),
+        height=dataframe_content_height(display, min_height=160, max_height=520, row_height=row_height),
         hide_index=True,
         column_config=column_config,
+        row_height=row_height,
     )
 
 
@@ -1127,6 +1150,11 @@ def predictions_component_document(body: str, auto_resize: bool = False) -> str:
       text-align: center;
       vertical-align: middle;
       white-space: normal;
+    }}
+
+    .predictions-table td.predictions-cell-reason {{
+      text-align: left;
+      white-space: pre-line;
     }}
 
     .predictions-table th {{

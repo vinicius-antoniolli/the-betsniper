@@ -16,7 +16,7 @@ class ReasonDisplayTests(unittest.TestCase):
 
         self.assertEqual(
             clean_reason_for_display(reason),
-            "Chapecoense (mandante) - Acertos 7/8 | Botafogo (visitante) - Acertos 8/10",
+            "Chapecoense (mandante) - Acertos 7/8\nBotafogo (visitante) - Acertos 8/10",
         )
 
     def test_removes_espn_source_and_accented_criterion(self) -> None:
@@ -25,6 +25,21 @@ class ReasonDisplayTests(unittest.TestCase):
         self.assertEqual(
             clean_reason_for_display(reason),
             "Filtro: jogos como mandante | Vitoria - Acertos 7/7",
+        )
+
+    def test_breaks_long_two_team_reason_lines(self) -> None:
+        reason = (
+            "Fonte: ESPN | Criterio: BTTS | "
+            "Aston Villa (mandante) - Acertos 7/10 [ 4-0 - 1-2 ] | "
+            "Liverpool (visitante) - Acertos 6/10 [ 3-2 - 1-2 ]"
+        )
+
+        self.assertEqual(
+            clean_reason_for_display(reason),
+            (
+                "Aston Villa (mandante) - Acertos 7/10 [ 4-0 - 1-2 ]\n"
+                "Liverpool (visitante) - Acertos 6/10 [ 3-2 - 1-2 ]"
+            ),
         )
 
     def test_keeps_missing_value(self) -> None:

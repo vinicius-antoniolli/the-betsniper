@@ -17,6 +17,28 @@ def _metadata_key(value: str) -> str:
     return normalize("NFKD", value).encode("ascii", "ignore").decode("ascii").casefold()
 
 
+def _is_hit_reason_part(value: str) -> bool:
+    key = _metadata_key(value)
+    return " - acertos " in key or key.startswith("acertos ")
+
+
+def _join_reason_parts(parts: list[str]) -> str:
+    if sum(1 for part in parts if _is_hit_reason_part(part)) < 2:
+        return " | ".join(parts)
+
+    lines: list[list[str]] = []
+    current: list[str] = []
+    for part in parts:
+        if _is_hit_reason_part(part) and any(_is_hit_reason_part(item) for item in current):
+            lines.append(current)
+            current = [part]
+            continue
+        current.append(part)
+    if current:
+        lines.append(current)
+    return "\n".join(" | ".join(line) for line in lines)
+
+
 def clean_reason_for_display(value: object) -> object:
     if _is_missing(value):
         return value
@@ -31,7 +53,7 @@ def clean_reason_for_display(value: object) -> object:
         if key.startswith("criterio:"):
             continue
         parts.append(part)
-    return " | ".join(parts)
+    return _join_reason_parts(parts)
 
 
 def format_sample_value(value: object) -> str:
