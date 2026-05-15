@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from unicodedata import normalize
 
 import pandas as pd
@@ -16,6 +17,28 @@ def _metadata_key(value: str) -> str:
     return normalize("NFKD", value).encode("ascii", "ignore").decode("ascii").casefold()
 
 
+def _is_hit_reason_part(value: str) -> bool:
+    key = _metadata_key(value)
+    return " - acertos " in key or key.startswith("acertos ")
+
+
+def _join_reason_parts(parts: list[str]) -> str:
+    if sum(1 for part in parts if _is_hit_reason_part(part)) < 2:
+        return " | ".join(parts)
+
+    lines: list[list[str]] = []
+    current: list[str] = []
+    for part in parts:
+        if _is_hit_reason_part(part) and any(_is_hit_reason_part(item) for item in current):
+            lines.append(current)
+            current = [part]
+            continue
+        current.append(part)
+    if current:
+        lines.append(current)
+    return "\n".join(" | ".join(line) for line in lines)
+
+
 def clean_reason_for_display(value: object) -> object:
     if _is_missing(value):
         return value
@@ -30,4 +53,29 @@ def clean_reason_for_display(value: object) -> object:
         if key.startswith("criterio:"):
             continue
         parts.append(part)
-    return " | ".join(parts)
+    return _join_reason_parts(parts)
+
+
+def format_sample_value(value: object) -> str:
+    if _is_missing(value):
+        return ""
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value).strip()
+    if math.isnan(number):
+        return ""
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.2f}".rstrip("0").rstrip(".")
+
+
+def sample_values_suffix(values: list[object]) -> str:
+    samples = [sample for value in values if (sample := format_sample_value(value))]
+    return f" [ {' - '.join(samples)} ]" if samples else ""
+
+
+def format_hits_with_samples(hits: int, total: int, values: list[object] | None = None) -> str:
+    return f"Acertos {hits}/{total}{sample_values_suffix(values or [])}"

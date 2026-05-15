@@ -16,10 +16,10 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.x_publish_password, "secret")
 
-    def test_playwright_chromium_executable_reads_env_alias(self) -> None:
-        settings = Settings(_env_file=None, PLAYWRIGHT_CHROMIUM_EXECUTABLE="/usr/bin/chromium")
+    def test_public_viewer_mode_reads_env_alias(self) -> None:
+        settings = Settings(_env_file=None, PUBLIC_VIEWER_MODE="true")
 
-        self.assertEqual(settings.playwright_chromium_executable, "/usr/bin/chromium")
+        self.assertTrue(settings.public_viewer_mode)
 
 
 if __name__ == "__main__":

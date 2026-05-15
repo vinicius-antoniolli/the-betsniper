@@ -9,14 +9,19 @@ from src.db.migrations import run_sqlite_migrations
 
 
 def _db_url() -> str:
-    if settings.app_db_url.startswith("sqlite:///"):
-        raw_path = settings.app_db_url.replace("sqlite:///", "", 1)
+    url = settings.app_db_url
+    if settings.public_viewer_mode and url == "sqlite:///data/betsniper.db":
+        public_db_path = ROOT_DIR / "public_data" / "betsniper_public.db"
+        if public_db_path.exists():
+            url = "sqlite:///public_data/betsniper_public.db"
+    if url.startswith("sqlite:///"):
+        raw_path = url.replace("sqlite:///", "", 1)
         db_path = Path(raw_path)
         if not db_path.is_absolute():
             db_path = ROOT_DIR / db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return f"sqlite:///{db_path.as_posix()}"
-    return settings.app_db_url
+    return url
 
 
 engine = create_engine(_db_url(), echo=False, connect_args={"check_same_thread": False})

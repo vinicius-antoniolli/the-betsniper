@@ -131,6 +131,66 @@ X_PUBLISH_PASSWORD=sua_senha_para_liberar_publicacao
 
 Abra `Barbadas do Dia`, clique no botao escondido acima do titulo `Betsniper`, digite `X_PUBLISH_PASSWORD` e entao publique. O dashboard cria 1 post por aposta e espera `X_POST_DELAY_SECONDS` entre posts.
 
+No viewer publico online, a publicacao no X fica bloqueada por seguranca. Gere/publice os posts localmente no `app.py`.
+
+## Publicar online custo 0
+
+Arquitetura suportada:
+
+```text
+Local: coleta ESPN/Betfair + gera SQLite publico
+Online: Streamlit le somente public_data/betsniper_public.db
+```
+
+O online nao roda login/scraping Betfair e nao publica no X. Ele usa massa pronta gerada localmente.
+
+Fluxo diario recomendado:
+
+```powershell
+.\.venv\Scripts\python.exe main.py --date YYYY-MM-DD --days 2
+.\.venv\Scripts\python.exe scripts\export_public_data.py --date YYYY-MM-DD --days 2
+.\.venv\Scripts\python.exe scripts\smoke_public_viewer.py
+```
+
+O export gera:
+
+```text
+public_data/betsniper_public.db
+public_data/public_snapshot.json
+```
+
+Para testar o viewer publico local:
+
+```powershell
+.\.venv\Scripts\streamlit.exe run streamlit_app.py --server.port 8509
+```
+
+Depois acesse:
+
+```text
+http://127.0.0.1:8509
+```
+
+Deploy no Streamlit Community Cloud:
+
+```text
+Repository: este repo
+Main file path: streamlit_app.py
+Python deps: requirements.txt
+Secrets Betfair/X: nao configurar
+```
+
+`streamlit_app.py` liga automaticamente:
+
+```text
+PUBLIC_VIEWER_MODE=true
+BETFAIR_WEB_ENABLED=false
+X_AUTO_PUBLISH_ENABLED=false
+APP_DB_URL=sqlite:///public_data/betsniper_public.db
+```
+
+Sempre que atualizar dados, rode o export local, envie `public_data/betsniper_public.db` e `public_data/public_snapshot.json` para o repo e redeploy.
+
 Se a Betfair exigir captcha, 2FA ou alguma confirmacao visual, use temporariamente:
 
 ```text
