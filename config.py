@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     scraper_headless: bool = Field(default=True, alias="SCRAPER_HEADLESS")
     scraper_min_delay_seconds: int = Field(default=5, alias="SCRAPER_MIN_DELAY_SECONDS")
     scraper_max_delay_seconds: int = Field(default=15, alias="SCRAPER_MAX_DELAY_SECONDS")
+    playwright_chromium_executable: str | None = Field(default=None, alias="PLAYWRIGHT_CHROMIUM_EXECUTABLE")
 
     betfair_web_enabled: bool = Field(default=False, alias="BETFAIR_WEB_ENABLED")
     betfair_web_headless: bool = Field(default=True, alias="BETFAIR_WEB_HEADLESS")

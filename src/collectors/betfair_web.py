@@ -24,6 +24,7 @@ from src.collectors.betfair_auth import (
     grant_betfair_geolocation,
     is_betfair_login_page,
 )
+from src.collectors.playwright_runtime import chromium_launch_options
 from src.db.models import Match
 
 
@@ -102,13 +103,7 @@ class BetfairWebClient:
             return []
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=settings.betfair_web_headless,
-                args=[
-                    "--disable-quic",
-                    "--disable-features=UseDnsHttpsSvcb,UseHttpsSvcbAlpn,EncryptedClientHello",
-                ],
-            )
+            browser = p.chromium.launch(**chromium_launch_options(headless=settings.betfair_web_headless))
             context = browser.new_context(**betfair_context_options(self.storage_state))
             grant_betfair_geolocation(context)
             page = context.new_page()

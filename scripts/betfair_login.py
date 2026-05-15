@@ -14,6 +14,7 @@ from src.collectors.betfair_auth import (
     grant_betfair_geolocation,
     is_betfair_login_page,
 )
+from src.collectors.playwright_runtime import chromium_launch_options
 
 
 def rooted(path_value: str) -> Path:
@@ -26,7 +27,7 @@ def main() -> None:
     storage_state.parent.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(**chromium_launch_options(headless=False))
         context = browser.new_context(**betfair_context_options(storage_state))
         grant_betfair_geolocation(context)
         page = context.new_page()
