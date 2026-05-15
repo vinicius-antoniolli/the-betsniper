@@ -104,6 +104,56 @@ def _fetch_column(conn: sqlite3.Connection, sql: str, params: tuple[object, ...]
     return [str(row[0]) for row in conn.execute(sql, params).fetchall() if row[0] not in (None, "")]
 
 
+def _shrink_public_raw_json(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        UPDATE main.team_stats
+        SET raw_json = json_object(
+          'league',
+          json_object('name', json_extract(raw_json, '$.league.name'))
+        )
+        WHERE raw_json IS NOT NULL
+        """
+    )
+    conn.execute(
+        """
+        UPDATE main.player_stats
+        SET raw_json = json_object(
+          'starter', json_extract(raw_json, '$.starter'),
+          'position', json_extract(raw_json, '$.position'),
+          'jersey', json_extract(raw_json, '$.jersey')
+        )
+        WHERE raw_json IS NOT NULL
+        """
+    )
+    conn.execute(
+        """
+        UPDATE main.odds_snapshots
+        SET raw_json = json_object(
+          'home_team', raw_home_team,
+          'away_team', raw_away_team,
+          'commence_time', commence_time,
+          'market_type', coalesce(market_type, market_key),
+          'market_key', market_key,
+          'market_name', market_name,
+          'market_type_raw', market_type_raw,
+          'market_category', market_category,
+          'team_side', team_side,
+          'team_name', team_name,
+          'player_name', player_name,
+          'player_id', player_id,
+          'main_line', main_line,
+          'runner_name', runner_name,
+          'runner_handicap', runner_handicap,
+          'outcome_name', outcome_name,
+          'point', point,
+          'price', price
+        )
+        WHERE raw_json IS NOT NULL
+        """
+    )
+
+
 def export_public_snapshot(
     source_db: Path,
     output_db: Path = DEFAULT_OUTPUT,
@@ -203,6 +253,7 @@ def export_public_snapshot(
             counts["team_stats"] = 0
             counts["player_stats"] = 0
 
+        _shrink_public_raw_json(conn)
         conn.commit()
         conn.execute("DETACH DATABASE src")
         conn.execute("VACUUM")

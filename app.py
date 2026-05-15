@@ -3958,10 +3958,11 @@ if stale_odds_count:
     st.warning(f"{stale_odds_count} odds acima de {settings.odds_stale_after_hours}h. Confira Betfair/ETL antes de apostar.")
 
 tab_options = ["Barbadas do Dia", "Palpites", "Estatísticas dos Times", "Estatísticas jogadores", "Jogos", "Odds"]
+default_tab = "Jogos" if settings.public_viewer_mode else tab_options[0]
 active_tab = st.segmented_control(
     "Aba",
     tab_options,
-    default=tab_options[0],
+    default=default_tab,
     label_visibility="collapsed",
 )
 
