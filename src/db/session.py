@@ -6,6 +6,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from config import ROOT_DIR, ensure_runtime_dirs, settings
 from src.db.migrations import run_sqlite_migrations
+from src.db import models  # noqa: F401
 
 
 def _db_url() -> str:
