@@ -1,0 +1,11 @@
+.venv/
+.idea/
+__pycache__/
+*.pyc
+.env
+data/*.db
+data/*.db-*
+data/betfair_storage_state.json
+data/betfair_event_urls.json
+logs/
+.streamlit/secrets.toml

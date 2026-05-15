@@ -1,0 +1,8 @@
+apscheduler>=3.10,<4
+httpx>=0.27,<1
+playwright>=1.56,<2
+pandas>=2.2,<4
+python-dotenv>=1,<2
+pydantic-settings>=2.5,<3
+sqlmodel>=0.0.22,<1
+streamlit>=1.51,<2
