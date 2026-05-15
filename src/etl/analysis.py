@@ -6,6 +6,7 @@ from unicodedata import normalize
 from sqlmodel import Session, select
 
 from src.db.models import AnalysisResult, Match, TeamStat
+from src.domain.reasons import format_hits_with_samples
 from src.etl.helpers import upsert_analysis_result
 
 SOURCE_PRIORITY = {"espn": 0}
@@ -85,6 +86,21 @@ def _hit_count(stats: list[TeamStat], attr: str) -> tuple[int, int]:
     return sum(1 for value in values if value), len(values)
 
 
+def _sample_values(stats: list[TeamStat], attr: str) -> list[object]:
+    samples = []
+    for row in _dedupe_stats(stats, attr):
+        value = getattr(row, attr)
+        if value is None:
+            continue
+        if attr in {"over_15", "over_25"} and row.goals_for is not None and row.goals_against is not None:
+            samples.append(row.goals_for + row.goals_against)
+        elif attr == "btts" and row.goals_for is not None and row.goals_against is not None:
+            samples.append(f"{row.goals_for}-{row.goals_against}")
+        else:
+            samples.append(value)
+    return samples
+
+
 def _stat_detail(stats: list[TeamStat], attr: str) -> str:
     details = []
     for row in _dedupe_stats(stats, attr):
@@ -131,14 +147,16 @@ def analyze_match(session: Session, match: Match) -> None:
         away_hits, away_total = _hit_count(away_stats, attr)
         home_sample = _dedupe_stats(home_stats, attr)
         away_sample = _dedupe_stats(away_stats, attr)
+        home_values = _sample_values(home_stats, attr)
+        away_values = _sample_values(away_stats, attr)
         total = home_total + away_total
         if total == 0:
             continue
         score = round(((home_hits + away_hits) / total) * 100, 1)
         reason = (
             f"Fonte: {_sources_label(home_sample, away_sample)} | "
-            f"{match.home_team} - Acertos {home_hits}/{home_total} | "
-            f"{match.away_team} - Acertos {away_hits}/{away_total}"
+            f"{match.home_team} - {format_hits_with_samples(home_hits, home_total, home_values)} | "
+            f"{match.away_team} - {format_hits_with_samples(away_hits, away_total, away_values)}"
         )
         upsert_analysis_result(
             session,

@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from base64 import b64encode
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from functools import lru_cache
 from html import escape
@@ -21,7 +22,7 @@ from src.dashboard.data import read_sql_frame
 from src.db.session import init_db, sqlite_db_path
 from src.domain import scoring as score_logic
 from src.domain import team_matchups as matchup_logic
-from src.domain.reasons import clean_reason_for_display
+from src.domain.reasons import clean_reason_for_display, format_hits_with_samples, format_sample_value
 from src.domain.x_posts import XPostDraft, build_best_bet_x_posts
 from src.integrations.x_api import XCredentials, XPostError, publish_x_posts
 
@@ -1709,6 +1710,26 @@ def total_range_from_pick(value: object) -> tuple[int, int] | None:
     return None
 
 
+def stat_pair_value(stat: pd.Series, left_attr: str, right_attr: str) -> str:
+    left = format_sample_value(stat.get(left_attr))
+    right = format_sample_value(stat.get(right_attr))
+    return f"{left}-{right}" if left and right else ""
+
+
+def side_scoreline(stat: pd.Series, side: str, first_half: bool = False) -> str:
+    goals_for_attr = "first_half_goals_for" if first_half else "goals_for"
+    goals_against_attr = "first_half_goals_against" if first_half else "goals_against"
+    goals_for = stat.get(goals_for_attr)
+    goals_against = stat.get(goals_against_attr)
+    if side == "home":
+        return stat_pair_value(pd.Series({"home": goals_for, "away": goals_against}), "home", "away")
+    return stat_pair_value(pd.Series({"home": goals_against, "away": goals_for}), "home", "away")
+
+
+def side_total_goals(stat: pd.Series, _side: str) -> object:
+    return team_stat_value(stat, "goals_total")
+
+
 def team_samples(
     team_stats_df: pd.DataFrame,
     match: pd.Series,
@@ -1725,36 +1746,40 @@ def game_predicate_score_reason(
     team_stats_df: pd.DataFrame,
     predicate,
     criterion: str,
+    sample_value: Callable[[pd.Series, str], object] | None = None,
 ) -> tuple[str, str]:
     if team_stats_df.empty:
         return "N/D", ""
-    hits_by_team: list[tuple[str, str, int, int]] = []
+    hits_by_team: list[tuple[str, str, int, int, list[object]]] = []
     sources = set()
     hits = 0
     total = 0
     for team_name, side, rows in team_samples(team_stats_df, match):
         team_hits = 0
         team_total = 0
+        team_values = []
         for _, stat in rows.iterrows():
             hit = predicate(stat, side)
             if hit is None:
                 continue
             team_hits += int(hit)
             team_total += 1
+            if sample_value is not None:
+                team_values.append(sample_value(stat, side))
             if stat.get("source"):
                 sources.add(str(stat.get("source")))
         hits += team_hits
         total += team_total
-        hits_by_team.append((team_name, side, team_hits, team_total))
-    if any(team_total < MIN_SCORE_SAMPLES for _, _, _, team_total in hits_by_team):
+        hits_by_team.append((team_name, side, team_hits, team_total, team_values))
+    if any(team_total < MIN_SCORE_SAMPLES for _, _, _, team_total, _ in hits_by_team):
         return "N/D", ""
     if total == 0:
         return "N/D", ""
     source_text = ", ".join(source_label(source) for source in sorted(sources, key=lambda item: SOURCE_PRIORITY.get(item, 99))) or "ESPN"
     parts = [f"Fonte: {source_text}", f"Criterio: {criterion}"]
     parts.extend(
-        f"{team} ({'mandante' if side == 'home' else 'visitante'}) - Acertos {team_hits}/{team_total}"
-        for team, side, team_hits, team_total in hits_by_team
+        f"{team} ({'mandante' if side == 'home' else 'visitante'}) - {format_hits_with_samples(team_hits, team_total, team_values)}"
+        for team, side, team_hits, team_total, team_values in hits_by_team
     )
     return hit_score(hits, total), " | ".join(parts)
 
@@ -1855,9 +1880,9 @@ def evidence_from_items(
     if criterion:
         parts.append(f"Criterio: {criterion}")
     if subject:
-        parts.append(f"{subject} - Acertos {hits}/{total}")
+        parts.append(f"{subject} - {format_hits_with_samples(hits, total, values)}")
     else:
-        parts.append(f"Acertos {hits}/{total}")
+        parts.append(format_hits_with_samples(hits, total, values))
     return " | ".join(parts)
 
 
@@ -1866,24 +1891,25 @@ def bool_evidence(
     team_name: object,
     attr: str,
     is_home: bool | None = None,
-) -> tuple[int, int, str, str]:
+) -> tuple[int, int, str, str, list[object]]:
     rows = team_stats_df[team_stats_df["team_name"].apply(lambda value: teams_match(value, team_name))].copy()
     if rows.empty or attr not in rows.columns:
-        return 0, 0, "", ""
+        return 0, 0, "", "", []
     if is_home is not None and "is_home" in rows.columns:
         rows = rows[rows["is_home"].notna()].copy()
         rows = rows[rows["is_home"].astype(bool) == is_home]
         if rows.empty:
-            return 0, 0, "", ""
+            return 0, 0, "", "", []
     rows = rows[rows[attr].notna()].copy()
     if rows.empty:
-        return 0, 0, "", ""
+        return 0, 0, "", "", []
     rows["_source_rank"] = rows["source"].map(SOURCE_PRIORITY).fillna(99) if "source" in rows.columns else 99
     rows = rows.sort_values(["match_date", "_source_rank"], ascending=[False, True])
     rows = rows.drop_duplicates(["match_date"], keep="first").head(SCORE_SAMPLE_LIMIT)
     details = []
     hits = 0
     total = 0
+    samples = []
     sources = set()
     for _, row in rows.iterrows():
         value = row.get(attr)
@@ -1897,30 +1923,38 @@ def bool_evidence(
         goals_for = row.get("goals_for")
         goals_against = row.get("goals_against")
         score = f"{int(goals_for)}-{int(goals_against)}" if pd.notna(goals_for) and pd.notna(goals_against) else "placar N/D"
+        if attr in {"over_15", "over_25"}:
+            samples.append(team_stat_value(row, "goals_total"))
+        elif attr == "btts":
+            samples.append(side_scoreline(row, "home" if is_home else "away"))
         details.append(f"{row.get('match_date')} vs {row.get('opponent_name') or '?'} {score}={'sim' if hit else 'não'}")
     source_text = ", ".join(source_label(source) for source in sorted(sources, key=lambda item: SOURCE_PRIORITY.get(item, 99)))
-    return hits, total, "; ".join(details), source_text
+    return hits, total, "; ".join(details), source_text, samples
 
 
 def model_reason(match: pd.Series, market_key: object, team_stats_df: pd.DataFrame) -> str:
     market = str(market_key)
     if market not in {"over_15", "over_25", "btts"}:
         return ""
-    home_hits, home_total, _, home_sources = bool_evidence(team_stats_df, match.get("home_team"), market, True)
-    away_hits, away_total, _, away_sources = bool_evidence(team_stats_df, match.get("away_team"), market, False)
+    home_hits, home_total, _, home_sources, home_samples = bool_evidence(team_stats_df, match.get("home_team"), market, True)
+    away_hits, away_total, _, away_sources, away_samples = bool_evidence(team_stats_df, match.get("away_team"), market, False)
     if home_total < MIN_SCORE_SAMPLES or away_total < MIN_SCORE_SAMPLES:
         return ""
     source_text = ", ".join(dict.fromkeys([value for value in [home_sources, away_sources] if value]))
     criteria = {"over_15": "gols totais > 1.5", "over_25": "gols totais > 2.5", "btts": "ambas marcam"}
-    return f"Fonte: {source_text} | Criterio: {criteria.get(market, market)} | {match.get('home_team')} (mandante) - Acertos {home_hits}/{home_total} | {match.get('away_team')} (visitante) - Acertos {away_hits}/{away_total}"
+    return (
+        f"Fonte: {source_text} | Criterio: {criteria.get(market, market)} | "
+        f"{match.get('home_team')} (mandante) - {format_hits_with_samples(home_hits, home_total, home_samples)} | "
+        f"{match.get('away_team')} (visitante) - {format_hits_with_samples(away_hits, away_total, away_samples)}"
+    )
 
 
 def model_score(match: pd.Series, market_key: object, team_stats_df: pd.DataFrame) -> str:
     market = str(market_key)
     if market not in {"over_15", "over_25", "btts"}:
         return "N/D"
-    home_hits, home_total, _, _ = bool_evidence(team_stats_df, match.get("home_team"), market, True)
-    away_hits, away_total, _, _ = bool_evidence(team_stats_df, match.get("away_team"), market, False)
+    home_hits, home_total, _, _, _ = bool_evidence(team_stats_df, match.get("home_team"), market, True)
+    away_hits, away_total, _, _, _ = bool_evidence(team_stats_df, match.get("away_team"), market, False)
     total = home_total + away_total
     if home_total < MIN_SCORE_SAMPLES or away_total < MIN_SCORE_SAMPLES or total == 0:
         return "N/D"
@@ -1933,6 +1967,7 @@ def team_predicate_score_reason(
     is_home: bool | None,
     predicate,
     criterion: str,
+    sample_value: Callable[[pd.Series], object] | None = None,
 ) -> tuple[str, str]:
     if team_stats_df.empty:
         return "N/D", ""
@@ -1949,6 +1984,7 @@ def team_predicate_score_reason(
         return "N/D", ""
     hits = 0
     total = 0
+    samples = []
     sources = set()
     for _, stat in history.iterrows():
         hit = predicate(stat)
@@ -1956,6 +1992,8 @@ def team_predicate_score_reason(
             continue
         hits += int(hit)
         total += 1
+        if sample_value is not None:
+            samples.append(sample_value(stat))
         if stat.get("source"):
             sources.add(str(stat.get("source")))
     if total < MIN_SCORE_SAMPLES:
@@ -1963,7 +2001,21 @@ def team_predicate_score_reason(
     source_text = ", ".join(source_label(source) for source in sorted(sources, key=lambda item: SOURCE_PRIORITY.get(item, 99))) or "ESPN"
     side = side_filter_label(is_home)
     side_part = f" | Filtro: jogos como {side}" if side else ""
-    return hit_score(hits, total), f"Fonte: {source_text} | Criterio: {criterion}{side_part} | {team_name} - Acertos {hits}/{total}"
+    return hit_score(hits, total), f"Fonte: {source_text} | Criterio: {criterion}{side_part} | {team_name} - {format_hits_with_samples(hits, total, samples)}"
+
+
+def predicate_sample_values(
+    rows: pd.DataFrame,
+    predicate,
+    sample_value: Callable[[pd.Series], object] | None,
+) -> list[object]:
+    if sample_value is None:
+        return []
+    samples = []
+    for _, stat in rows.iterrows():
+        if predicate(stat) is not None:
+            samples.append(sample_value(stat))
+    return samples
 
 
 def team_matchup_score_reason(
@@ -1974,6 +2026,8 @@ def team_matchup_score_reason(
     team_predicate: matchup_logic.Predicate,
     opponent_predicate: matchup_logic.Predicate,
     criterion: str,
+    team_sample_value: Callable[[pd.Series], object] | None = None,
+    opponent_sample_value: Callable[[pd.Series], object] | None = None,
 ) -> tuple[str, str]:
     if match is None or is_home is None:
         return team_predicate_score_reason(row, team_stats_df, is_home, team_predicate, criterion)
@@ -1992,10 +2046,12 @@ def team_matchup_score_reason(
     ) or "ESPN"
     team_side = side_filter_label(is_home)
     opponent_side = side_filter_label(not is_home)
+    team_samples = predicate_sample_values(team_history, team_predicate, team_sample_value)
+    opponent_samples = predicate_sample_values(opponent_history, opponent_predicate, opponent_sample_value)
     reason = (
         f"Fonte: {source_text} | Criterio: {criterion} | "
-        f"{team_name} ({team_side}) - Acertos {result.team_hits}/{result.team_total} | "
-        f"{opponent_name} ({opponent_side}) - Acertos {result.opponent_hits}/{result.opponent_total}"
+        f"{team_name} ({team_side}) - {format_hits_with_samples(result.team_hits, result.team_total, team_samples)} | "
+        f"{opponent_name} ({opponent_side}) - {format_hits_with_samples(result.opponent_hits, result.opponent_total, opponent_samples)}"
     )
     return result.score, reason
 
@@ -2033,6 +2089,8 @@ def team_special_score_reason(
                 predicate,
                 lambda stat: matchup_logic.opponent_supports_goal_handicap(stat, handicap),
                 f"saldo + handicap {handicap:g} > 0",
+                lambda stat: stat_pair_value(stat, "goals_for", "goals_against"),
+                lambda stat: stat_pair_value(stat, "goals_for", "goals_against"),
             )
     if "vence qualquer" in text:
         return team_matchup_score_reason(
@@ -2062,7 +2120,7 @@ def team_special_score_reason(
                 return None
             return float(first) > 0 and float(second) > 0
 
-        return team_predicate_score_reason(row, team_stats_df, is_home, predicate, "marcou no 1T e 2T")
+        return team_predicate_score_reason(row, team_stats_df, is_home, predicate, "marcou no 1T e 2T", lambda stat: team_stat_value(stat, "goals_for"))
     if "lidera no intervalo" in text:
         return team_matchup_score_reason(
             row,
@@ -2098,6 +2156,8 @@ def team_special_score_reason(
             predicate,
             lambda stat: matchup_logic.less_than(stat, "corners_for", "corners_against"),
             "mais escanteios que adversario",
+            lambda stat: stat_pair_value(stat, "corners_for", "corners_against"),
+            lambda stat: stat_pair_value(stat, "corners_for", "corners_against"),
         )
     if "mais chutes no gol" in text:
         if each_half_text(text):
@@ -2116,6 +2176,8 @@ def team_special_score_reason(
             predicate,
             lambda stat: matchup_logic.less_than(stat, "shots_on_target_for", "shots_on_target_against"),
             "mais chutes no gol",
+            lambda stat: stat_pair_value(stat, "shots_on_target_for", "shots_on_target_against"),
+            lambda stat: stat_pair_value(stat, "shots_on_target_for", "shots_on_target_against"),
         )
     return "N/D", ""
 
@@ -2167,7 +2229,7 @@ def game_line_score_reason(
     def predicate(stat: pd.Series, _side: str) -> bool | None:
         return line_hit(team_stat_value(stat, attr), pick, line)
 
-    return game_predicate_score_reason(match, team_stats_df, predicate, criterion)
+    return game_predicate_score_reason(match, team_stats_df, predicate, criterion, lambda stat, _side: team_stat_value(stat, attr))
 
 
 def game_score_reason(row: pd.Series, match: pd.Series, team_stats_df: pd.DataFrame) -> tuple[str, str]:
@@ -2200,7 +2262,7 @@ def game_score_reason(row: pd.Series, match: pd.Series, team_stats_df: pd.DataFr
             value = float(stat.get("goals_for")) >= 2 and float(stat.get("goals_against")) >= 2
             return value is desired
 
-        return game_predicate_score_reason(match, team_stats_df, predicate, "ambos 2+ gols")
+        return game_predicate_score_reason(match, team_stats_df, predicate, "ambos 2+ gols", side_scoreline)
     if "ambos os times marcam no primeiro tempo" in text and desired is not None:
         def predicate(stat: pd.Series, _side: str) -> bool | None:
             first_for = stat.get("first_half_goals_for")
@@ -2210,7 +2272,7 @@ def game_score_reason(row: pd.Series, match: pd.Series, team_stats_df: pd.DataFr
             value = float(first_for) > 0 and float(first_against) > 0
             return value is desired
 
-        return game_predicate_score_reason(match, team_stats_df, predicate, "BTTS 1T")
+        return game_predicate_score_reason(match, team_stats_df, predicate, "BTTS 1T", lambda stat, side: side_scoreline(stat, side, True))
     if "ambos os times marcam em ambos os tempos" in text and desired is not None:
         def predicate(stat: pd.Series, _side: str) -> bool | None:
             first_for = stat.get("first_half_goals_for")
@@ -2222,7 +2284,7 @@ def game_score_reason(row: pd.Series, match: pd.Series, team_stats_df: pd.DataFr
             value = float(first_for) > 0 and float(first_against) > 0 and float(second_for) > 0 and float(second_against) > 0
             return value is desired
 
-        return game_predicate_score_reason(match, team_stats_df, predicate, "BTTS 1T e 2T")
+        return game_predicate_score_reason(match, team_stats_df, predicate, "BTTS 1T e 2T", side_scoreline)
     if ("ambos os times marcam" in text or market_key == "btts") and desired is not None:
         def predicate(stat: pd.Series, _side: str) -> bool | None:
             value = stat.get("btts")
@@ -2230,7 +2292,7 @@ def game_score_reason(row: pd.Series, match: pd.Series, team_stats_df: pd.DataFr
                 return None
             return bool(value) is desired
 
-        return game_predicate_score_reason(match, team_stats_df, predicate, "BTTS")
+        return game_predicate_score_reason(match, team_stats_df, predicate, "BTTS", side_scoreline)
     if "gol marcado em ambos os tempos" in text and desired is not None:
         def predicate(stat: pd.Series, _side: str) -> bool | None:
             first = team_stat_value(stat, "first_half_goals_total")
@@ -2240,7 +2302,7 @@ def game_score_reason(row: pd.Series, match: pd.Series, team_stats_df: pd.DataFr
             value = first > 0 and second > 0
             return value is desired
 
-        return game_predicate_score_reason(match, team_stats_df, predicate, "gol no 1T e 2T")
+        return game_predicate_score_reason(match, team_stats_df, predicate, "gol no 1T e 2T", side_total_goals)
 
     total_range = total_range_from_pick(row.get("Pick"))
     if "faixa de gols" in text and total_range:
@@ -2250,7 +2312,7 @@ def game_score_reason(row: pd.Series, match: pd.Series, team_stats_df: pd.DataFr
             total = team_stat_value(stat, "goals_total")
             return None if total is None else low <= total <= high
 
-        return game_predicate_score_reason(match, team_stats_df, predicate, f"gols totais entre {low}-{high}")
+        return game_predicate_score_reason(match, team_stats_df, predicate, f"gols totais entre {low}-{high}", side_total_goals)
 
     pairs = score_pairs_from_text(row.get("Pick"))
     if "qualquer outro empate" in text:
@@ -2264,7 +2326,7 @@ def game_score_reason(row: pd.Series, match: pd.Series, team_stats_df: pd.DataFr
                 return None
             return actual == "draw" and (int(home_goals), int(away_goals)) not in {(0, 0), (1, 1)}
 
-        return game_predicate_score_reason(match, team_stats_df, predicate, "empate exceto 0-0/1-1")
+        return game_predicate_score_reason(match, team_stats_df, predicate, "empate exceto 0-0/1-1", side_scoreline)
     if "placar correto" in text and pairs:
         def predicate(stat: pd.Series, side: str) -> bool | None:
             home_goals = stat.get("goals_for") if side == "home" else stat.get("goals_against")
@@ -2273,7 +2335,7 @@ def game_score_reason(row: pd.Series, match: pd.Series, team_stats_df: pd.DataFr
                 return None
             return (int(home_goals), int(away_goals)) in pairs
 
-        return game_predicate_score_reason(match, team_stats_df, predicate, "placar exato")
+        return game_predicate_score_reason(match, team_stats_df, predicate, "placar exato", side_scoreline)
 
     if "intervalo/fim" in text and "/" in str(row.get("Pick") or ""):
         parts = [part.strip() for part in str(row.get("Pick") or "").split("/", 1)]
@@ -2295,7 +2357,7 @@ def game_score_reason(row: pd.Series, match: pd.Series, team_stats_df: pd.DataFr
                 actual = side_result(stat, side, True)
                 return None if actual is None else actual in outcomes
 
-            return game_predicate_score_reason(match, team_stats_df, predicate, "resultado 1T")
+            return game_predicate_score_reason(match, team_stats_df, predicate, "resultado 1T", lambda stat, side: side_scoreline(stat, side, True))
 
     outcomes = result_outcomes_from_pick(match, row.get("Pick"))
     if outcomes and ("resultado" in text or "chance dupla" in text or "empate sem aposta" in text):
@@ -2318,7 +2380,7 @@ def game_score_reason(row: pd.Series, match: pd.Series, team_stats_df: pd.DataFr
                 hit = hit and total_hit
             return hit
 
-        return game_predicate_score_reason(match, team_stats_df, predicate, "resultado historico")
+        return game_predicate_score_reason(match, team_stats_df, predicate, "resultado historico", side_scoreline)
     return "N/D", ""
 
 

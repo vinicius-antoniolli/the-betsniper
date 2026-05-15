@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import unittest
 
-from src.domain.reasons import clean_reason_for_display
+from src.domain.reasons import clean_reason_for_display, format_hits_with_samples
 
 
 class ReasonDisplayTests(unittest.TestCase):
@@ -29,6 +29,12 @@ class ReasonDisplayTests(unittest.TestCase):
 
     def test_keeps_missing_value(self) -> None:
         self.assertTrue(math.isnan(clean_reason_for_display(math.nan)))
+
+    def test_formats_hits_with_sample_values(self) -> None:
+        self.assertEqual(
+            format_hits_with_samples(5, 5, [2, 1.0, 1.5, "0-0"]),
+            "Acertos 5/5 [ 2 - 1 - 1.5 - 0-0 ]",
+        )
 
 
 if __name__ == "__main__":
