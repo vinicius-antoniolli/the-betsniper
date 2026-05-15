@@ -20,7 +20,7 @@ def streamlit_command(port: int) -> list[str]:
         base = [str(streamlit_exe)]
     else:
         base = [sys.executable, "-m", "streamlit"]
-    return [*base, "run", "app.py", "--server.port", str(port)]
+    return [*base, "run", "streamlit_app.py", "--server.port", str(port)]
 
 
 def main() -> None:
