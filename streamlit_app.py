@@ -470,7 +470,7 @@ st.markdown(
 render_x_publish_auth_css()
 render_x_publish_unlock_control()
 render_x_publish_auth_css()
-st.title("Betsniper")
+st.markdown("<h1 style='text-align: center; padding-bottom: 0.5rem;'>Betsniper</h1>", unsafe_allow_html=True)
 
 
 SqlParams = dict[str, Any] | tuple[Any, ...] | list[Any] | None
@@ -501,7 +501,11 @@ def read_sql(query: str, params: SqlParams = None) -> pd.DataFrame:
 
 @lru_cache(maxsize=20000)
 def _plain_text_cached(text: str) -> str:
-    return normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower().strip()
+    # Normalize unicode (NFKD) and remove non-ascii, then lowercase
+    text = normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower()
+    # Replace all non-alphanumeric with spaces and collapse spaces
+    text = re.sub(r"[^a-z0-9]+", " ", text).strip()
+    return text
 
 
 def plain_text(value: object) -> str:
@@ -2883,13 +2887,13 @@ def player_rows_for_match_team(
     if not rows.empty:
         rows = rows[rows["team_name"].apply(lambda value: teams_match(value, team_name))].copy()
     if not rows.empty:
-        return roster_columns(rows)
+        return roster_columns(rows).drop_duplicates("player_name", keep="first")
 
     rows = latest_lineup_rows_for_team(lineups_df, team_name)
     if not rows.empty:
-        return rows
+        return rows.drop_duplicates("player_name", keep="first")
 
-    return latest_player_rows_from_stats(player_stats_df, team_name)
+    return latest_player_rows_from_stats(player_stats_df, team_name).drop_duplicates("player_name", keep="first")
 
 
 def player_team_index(match: pd.Series, lineups_df: pd.DataFrame) -> dict[str, str]:
@@ -3961,17 +3965,28 @@ def load_prediction_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd
     return matches, display_results, snapshots, team_stats, lineups, player_stats
 
 
-palpites_count, jogos_count, odds_count, stale_odds_count = load_dashboard_counts()
+tab_options = ["Barbadas do Dia", "Palpites", "Estatísticas dos Times", "Estatísticas jogadores"]
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Palpites", palpites_count)
-col2.metric("Jogos", jogos_count)
-col3.metric("Odds snapshots", odds_count)
-col4.metric("Odds stale", stale_odds_count)
-if stale_odds_count:
-    st.warning(f"{stale_odds_count} odds acima de {settings.odds_stale_after_hours}h. Confira Betfair/ETL antes de apostar.")
+st.markdown(
+    """
+    <style>
+    div[data-testid="stSegmentedControl"] {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+    }
+    div[data-testid="stSegmentedControl"] > div {
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        margin: 0 auto;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-tab_options = ["Barbadas do Dia", "Palpites", "Estatísticas dos Times", "Estatísticas jogadores", "Jogos", "Odds"]
 default_tab = tab_options[0]
 active_tab = st.segmented_control(
     "Aba",
@@ -4023,31 +4038,4 @@ elif active_tab == "Estatísticas jogadores":
         lambda _date, day_matches: render_player_statistics_tab(day_matches, lineups, player_stats),
         "target_date",
         "Sem jogos para a data.",
-    )
-
-elif active_tab == "Jogos":
-    render_day_expanders(
-        load_matches(),
-        lambda _date, day_matches: st.dataframe(
-            day_matches,
-            width="stretch",
-            hide_index=True,
-            height=dataframe_content_height(day_matches),
-        ),
-        "target_date",
-        "Sem jogos para a data.",
-    )
-
-elif active_tab == "Odds":
-    snapshots = load_snapshots()
-    render_day_expanders(
-        snapshots,
-        lambda _date, day_snapshots: st.dataframe(
-            day_snapshots.drop(columns=["raw_json"], errors="ignore"),
-            width="stretch",
-            hide_index=True,
-            height=dataframe_content_height(day_snapshots),
-        ),
-        "target_date",
-        "Sem odds para a data.",
     )

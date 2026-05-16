@@ -31,7 +31,7 @@ from src.db.models import Match
 log = logging.getLogger(__name__)
 
 
-DEFAULT_COMPETITION_URL = "https://www.betfair.bet.br/apostas/futebol/brasil-s%C3%A9rie-a/c-13"
+DEFAULT_COMPETITION_URL = "https://www.betfair.bet.br/apostas/futebol/brasileir%C3%A3o-s%C3%A9rie-a/c-13"
 POPULAR_TAB_ID = "Z-bW5BIAACIAOhai"
 SMP_PRICES_URL = "https://smp.betfair.bet.br/www/sports/fixedodds/readonly/v1/getMarketPrices"
 BFF_CARD_DOCUMENT_ID = "Card#2cb9a894754301e94e941b59a9fe938f"
@@ -149,10 +149,6 @@ class BetfairWebClient:
             if event_url:
                 log.info("Betfair URL: %s -> %s", match.label, event_url)
                 popular_rows = self._rows_from_popular_html(event_url, match)
-                if popular_rows:
-                    rows = self._dedupe_rows(popular_rows)
-                    return [self._event_from_rows(match, rows)]
-                log.warning("Betfair Popular vazio: %s", match.label)
                 try:
                     self._safe_goto(page, self._popular_url(event_url))
                 except Exception as exc:
@@ -169,9 +165,6 @@ class BetfairWebClient:
                     return []
                 log.info("Betfair URL via busca: %s -> %s", match.label, event_url)
                 popular_rows = self._rows_from_popular_html(event_url, match)
-                if popular_rows:
-                    rows = self._dedupe_rows(popular_rows)
-                    return [self._event_from_rows(match, rows)]
                 pre_rows = self._rows_from_dom(page, match)
                 self._expand_markets(page)
             time.sleep(3.0)

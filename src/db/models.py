@@ -10,6 +10,7 @@ from src.time_utils import utc_now
 
 class Team(SQLModel, table=True):
     __tablename__ = "teams"
+    __table_args__ = {"extend_existing": True}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(index=True)
@@ -18,11 +19,12 @@ class Team(SQLModel, table=True):
     country: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
-    __table_args__ = (UniqueConstraint("source", "source_team_id", name="uq_team_source_id"),)
+    __table_args__ = (UniqueConstraint("source", "source_team_id", name="uq_team_source_id"), {"extend_existing": True})
 
 
 class Player(SQLModel, table=True):
     __tablename__ = "players"
+    __table_args__ = {"extend_existing": True}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(index=True)
@@ -31,11 +33,12 @@ class Player(SQLModel, table=True):
     team_name: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
-    __table_args__ = (UniqueConstraint("source", "source_player_id", name="uq_player_source_id"),)
+    __table_args__ = (UniqueConstraint("source", "source_player_id", name="uq_player_source_id"), {"extend_existing": True})
 
 
 class Match(SQLModel, table=True):
     __tablename__ = "matches"
+    __table_args__ = {"extend_existing": True}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(index=True)
@@ -54,11 +57,12 @@ class Match(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
-    __table_args__ = (UniqueConstraint("source", "source_match_id", name="uq_match_source_id"),)
+    __table_args__ = (UniqueConstraint("source", "source_match_id", name="uq_match_source_id"), {"extend_existing": True})
 
 
 class OddsSnapshot(SQLModel, table=True):
     __tablename__ = "odds_snapshots"
+    __table_args__ = {"extend_existing": True}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(index=True)
@@ -90,6 +94,7 @@ class OddsSnapshot(SQLModel, table=True):
 
 class TeamStat(SQLModel, table=True):
     __tablename__ = "team_stats"
+    __table_args__ = {"extend_existing": True}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(index=True)
@@ -125,11 +130,12 @@ class TeamStat(SQLModel, table=True):
     raw_json: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
-    __table_args__ = (UniqueConstraint("source", "source_match_id", "team_name", name="uq_team_stat"),)
+    __table_args__ = (UniqueConstraint("source", "source_match_id", "team_name", name="uq_team_stat"), {"extend_existing": True})
 
 
 class PlayerStat(SQLModel, table=True):
     __tablename__ = "player_stats"
+    __table_args__ = {"extend_existing": True}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(index=True)
@@ -151,7 +157,7 @@ class PlayerStat(SQLModel, table=True):
     raw_json: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
 
-    __table_args__ = (UniqueConstraint("source", "source_match_id", "player_name", name="uq_player_stat"),)
+    __table_args__ = (UniqueConstraint("source", "source_match_id", "player_name", name="uq_player_stat"), {"extend_existing": True})
 
 
 class PlayerLineup(SQLModel, table=True):
@@ -171,6 +177,7 @@ class PlayerLineup(SQLModel, table=True):
 
     __table_args__ = (
         UniqueConstraint("source", "source_match_id", "player_name", "team_name", name="uq_player_lineup"),
+        {"extend_existing": True},
     )
 
 
@@ -194,11 +201,13 @@ class AnalysisResult(SQLModel, table=True):
 
     __table_args__ = (
         UniqueConstraint("target_date", "source_match_id", "market_key", "pick", name="uq_analysis_pick"),
+        {"extend_existing": True},
     )
 
 
 class FetchCache(SQLModel, table=True):
     __tablename__ = "fetch_cache"
+    __table_args__ = {"extend_existing": True}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(index=True)
@@ -213,6 +222,7 @@ class FetchCache(SQLModel, table=True):
 
 class EntityAlias(SQLModel, table=True):
     __tablename__ = "entity_aliases"
+    __table_args__ = {"extend_existing": True}
 
     id: Optional[int] = Field(default=None, primary_key=True)
     entity_type: str = Field(index=True)

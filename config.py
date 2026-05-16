@@ -89,6 +89,7 @@ def football_leagues() -> tuple[FootballLeagueConfig, ...]:
             country="Brazil",
             espn_slug="bra.2",
             espn_season=settings.espn_season,
+            betfair_competition_url="https://www.betfair.bet.br/apostas/futebol/brasileir%C3%A3o-s%C3%A9rie-b/c-321319",
         ),
         FootballLeagueConfig(
             name="Premier League (Inglaterra)",
