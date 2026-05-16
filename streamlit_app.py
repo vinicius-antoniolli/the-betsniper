@@ -2841,6 +2841,15 @@ def roster_columns(rows: pd.DataFrame) -> pd.DataFrame:
     return output[["source_match_id", "player_name", "team_name", "starter", "position", "jersey"]]
 
 
+def dedupe_by_plain_name(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    temp_df = df.copy()
+    temp_df["_plain_name"] = temp_df["player_name"].apply(plain_text)
+    temp_df["_plain_team"] = temp_df["team_name"].apply(plain_text)
+    return temp_df.drop_duplicates(["_plain_name", "_plain_team"], keep="first").drop(columns=["_plain_name", "_plain_team"])
+
+
 def latest_lineup_rows_for_team(lineups_df: pd.DataFrame, team_name: object) -> pd.DataFrame:
     if lineups_df.empty:
         return pd.DataFrame()
@@ -2852,9 +2861,11 @@ def latest_lineup_rows_for_team(lineups_df: pd.DataFrame, team_name: object) -> 
         latest_date = rows["match_date"].dropna().max()
         if latest_date:
             rows = rows[rows["match_date"].eq(latest_date)]
-    return roster_columns(rows).sort_values(
-        ["starter", "position", "player_name"],
-        ascending=[False, True, True],
+    return dedupe_by_plain_name(
+        roster_columns(rows).sort_values(
+            ["starter", "position", "player_name"],
+            ascending=[False, True, True],
+        )
     ).reset_index(drop=True)
 
 
@@ -2872,9 +2883,9 @@ def latest_player_rows_from_stats(player_stats_df: pd.DataFrame, team_name: obje
         return rows
     if "starter" not in rows.columns or not rows["starter"].notna().any():
         rows["starter"] = True
-    rows = roster_columns(rows)
-    rows = rows.drop_duplicates("player_name", keep="first")
-    return rows.sort_values(["starter", "position", "player_name"], ascending=[False, True, True]).reset_index(drop=True)
+    return dedupe_by_plain_name(
+        roster_columns(rows).sort_values(["starter", "position", "player_name"], ascending=[False, True, True])
+    ).reset_index(drop=True)
 
 
 def player_rows_for_match_team(
@@ -2887,13 +2898,13 @@ def player_rows_for_match_team(
     if not rows.empty:
         rows = rows[rows["team_name"].apply(lambda value: teams_match(value, team_name))].copy()
     if not rows.empty:
-        return roster_columns(rows).drop_duplicates("player_name", keep="first")
+        return dedupe_by_plain_name(roster_columns(rows))
 
     rows = latest_lineup_rows_for_team(lineups_df, team_name)
     if not rows.empty:
-        return rows.drop_duplicates("player_name", keep="first")
+        return rows
 
-    return latest_player_rows_from_stats(player_stats_df, team_name).drop_duplicates("player_name", keep="first")
+    return latest_player_rows_from_stats(player_stats_df, team_name)
 
 
 def player_team_index(match: pd.Series, lineups_df: pd.DataFrame) -> dict[str, str]:
