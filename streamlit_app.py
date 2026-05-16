@@ -6,9 +6,9 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent
 PUBLIC_DB = ROOT_DIR / "public_data" / "betsniper_public.db"
 
-os.environ["PUBLIC_VIEWER_MODE"] = "true"
-os.environ["BETFAIR_WEB_ENABLED"] = "false"
-os.environ["X_AUTO_PUBLISH_ENABLED"] = "false"
+# os.environ["PUBLIC_VIEWER_MODE"] = "true"
+# os.environ["BETFAIR_WEB_ENABLED"] = "false"
+# os.environ["X_AUTO_PUBLISH_ENABLED"] = "false"
 
 if PUBLIC_DB.exists():
     os.environ.setdefault("APP_DB_URL", "sqlite:///public_data/betsniper_public.db")
@@ -104,13 +104,11 @@ def ensure_x_publish_unlocked() -> bool:
 
 
 def render_x_publish_unlock_control() -> None:
-    if settings.public_viewer_mode:
-        return
     if is_x_publish_unlocked():
         return
 
     with st.container(key="x_publish_unlock_slot"):
-        if st.button("X", key="x_publish_unlock_button"):
+        if st.button("Login", key="x_publish_unlock_button"):
             st.session_state[X_PUBLISH_UNLOCK_REQUESTED_KEY] = True
 
     if not st.session_state.get(X_PUBLISH_UNLOCK_REQUESTED_KEY):
@@ -208,10 +206,11 @@ st.markdown(
       min-height: 1.75rem;
       height: 1.75rem;
       padding: 0;
-      border: 0;
-      opacity: 0;
-      background: transparent;
-      box-shadow: none;
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      font-size: 0.8rem;
       position: relative;
       z-index: 1000002;
     }
@@ -220,8 +219,8 @@ st.markdown(
     .st-key-x_publish_unlock_slot button:focus,
     .st-key-x_publish_unlock_button button:hover,
     .st-key-x_publish_unlock_button button:focus {
-      opacity: 0;
-      background: transparent;
+      background: rgba(255, 255, 255, 0.2);
+      border-color: white;
     }
 
     [data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) {
@@ -1438,8 +1437,6 @@ def maybe_auto_publish_x(
     over_limit: list[XPostDraft],
     key_prefix: str,
 ) -> None:
-    if settings.public_viewer_mode:
-        return
     if not settings.x_auto_publish_enabled:
         return
     if missing:
@@ -1478,8 +1475,6 @@ def render_x_single_publish_controls(
 
 
 def render_x_publish_controls(rows: pd.DataFrame, key_prefix: str = "best_bets") -> None:
-    if settings.public_viewer_mode:
-        return
     if not is_x_publish_unlocked():
         return
 
