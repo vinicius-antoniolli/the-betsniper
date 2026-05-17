@@ -701,6 +701,7 @@ def public_results(display: pd.DataFrame) -> pd.DataFrame:
 
 
 GAME_COLUMNS = ["Data", "Liga", "Casa", "Fora", "Time", "Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
+GAME_MARKET_COLUMNS = ["Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
 TEAM_COLUMNS = ["Time", "Mercado", "Pick", "Linha", "Odd", "Score", "Motivo"]
 TEAM_PREDICTION_COLUMNS = ["Time", "Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
 PLAYER_COLUMNS = ["Jogador", "Time", "Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
@@ -3076,7 +3077,7 @@ def toggle_player_group(group_key: str) -> None:
 
 def render_game_market_sections(game_rows: pd.DataFrame, match_key: str) -> None:
     if game_rows.empty:
-        render_table(pd.DataFrame(columns=GAME_COLUMNS))
+        render_table(pd.DataFrame(columns=GAME_MARKET_COLUMNS))
         return
     rows = game_rows.copy()
     rows["_section"] = rows.apply(game_section, axis=1)
@@ -3085,12 +3086,12 @@ def render_game_market_sections(game_rows: pd.DataFrame, match_key: str) -> None
         if section_rows.empty:
             continue
         with st.expander(section, expanded=True):
-            render_table(section_rows[GAME_COLUMNS])
+            render_table(section_rows[GAME_MARKET_COLUMNS])
 
 
 def game_market_sections_html(game_rows: pd.DataFrame, sortable: bool = False) -> str:
     if game_rows.empty:
-        return prediction_table_html(pd.DataFrame(columns=GAME_COLUMNS), GAME_COLUMNS, sortable=sortable)
+        return prediction_table_html(pd.DataFrame(columns=GAME_MARKET_COLUMNS), GAME_MARKET_COLUMNS, sortable=sortable)
     rows = game_rows.copy()
     rows["_section"] = rows.apply(game_section, axis=1)
     parts = []
@@ -3098,9 +3099,9 @@ def game_market_sections_html(game_rows: pd.DataFrame, sortable: bool = False) -
         section_rows = rows[rows["_section"] == section].drop(columns=["_section", "market_key"], errors="ignore")
         if section_rows.empty:
             continue
-        body = prediction_table_html(section_rows, GAME_COLUMNS, sortable=sortable)
+        body = prediction_table_html(section_rows, GAME_MARKET_COLUMNS, sortable=sortable)
         parts.append(prediction_details_html(f"{section} ({len(section_rows)})", body, True))
-    return "".join(parts) or prediction_table_html(pd.DataFrame(columns=GAME_COLUMNS), GAME_COLUMNS, sortable=sortable)
+    return "".join(parts) or prediction_table_html(pd.DataFrame(columns=GAME_MARKET_COLUMNS), GAME_MARKET_COLUMNS, sortable=sortable)
 
 
 def prediction_grid_html(*sections: str) -> str:
