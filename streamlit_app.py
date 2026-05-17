@@ -159,22 +159,20 @@ st.markdown(
     """
     <style>
     [data-testid="stAppViewContainer"] {
-      height: 100vh;
-      overflow: hidden;
+      height: auto;
     }
 
     [data-testid="stAppViewContainer"] > .main {
-      height: 100vh;
-      overflow: hidden;
+      height: auto;
     }
 
     [data-testid="stAppViewContainer"] .block-container {
-      height: 100vh;
-      max-height: 100vh;
-      overflow-y: auto;
+      height: auto;
+      max-height: none;
+      overflow-y: visible;
       overflow-x: hidden;
       padding-top: 0.75rem;
-      padding-bottom: 0;
+      padding-bottom: 2rem;
     }
 
     [data-testid="stElementContainer"]:has(h1) {
@@ -240,8 +238,8 @@ st.markdown(
     }
 
     [data-testid="stTabs"] [role="tabpanel"] {
-      height: calc(100vh - 190px);
-      overflow-y: auto;
+      height: auto;
+      overflow-y: visible;
       overflow-x: hidden;
       padding-right: 0.5rem;
       padding-bottom: 2rem;
@@ -394,8 +392,8 @@ st.markdown(
 
     .predictions-table-wrap {
       overflow-x: auto;
-      max-height: 360px;
-      overflow-y: auto;
+      max-height: none;
+      overflow-y: visible;
     }
 
     .predictions-table {
@@ -954,7 +952,7 @@ def table_row_height(rows: pd.DataFrame) -> int:
 def render_table(rows: pd.DataFrame, height: int = TABLE_5_ROWS_HEIGHT) -> None:
     display = clean_reason_column(rows.copy())
     row_height = table_row_height(display)
-    height = max(height, dataframe_content_height(display, min_height=height, max_height=520, row_height=row_height))
+    height = max(height, dataframe_content_height(display, min_height=height, max_height=2500, row_height=row_height))
     column_config = {}
     if "Score" in display.columns:
         display["Score"] = pd.to_numeric(display["Score"], errors="coerce")
@@ -975,7 +973,7 @@ def render_table(rows: pd.DataFrame, height: int = TABLE_5_ROWS_HEIGHT) -> None:
     )
 
 
-def dataframe_content_height(rows: pd.DataFrame, min_height: int = 110, max_height: int = 520, row_height: int = 35) -> int:
+def dataframe_content_height(rows: pd.DataFrame, min_height: int = 110, max_height: int = 2500, row_height: int = 35) -> int:
     row_count = 0 if rows is None or rows.empty else len(rows)
     return min(max_height, max(min_height, 38 + (row_count + 1) * row_height))
 
@@ -1071,7 +1069,7 @@ def render_best_bets_table(rows: pd.DataFrame) -> None:
     st.dataframe(
         display,
         width="stretch",
-        height=dataframe_content_height(display, min_height=160, max_height=520, row_height=row_height),
+        height=dataframe_content_height(display, min_height=160, max_height=2500, row_height=row_height),
         hide_index=True,
         column_config=column_config,
         row_height=row_height,
@@ -1178,8 +1176,8 @@ def predictions_component_document(body: str, auto_resize: bool = False) -> str:
     }}
 
     .predictions-table-wrap {{
-      max-height: 360px;
-      overflow: auto;
+      max-height: none;
+      overflow: visible;
     }}
 
     .predictions-table {{
@@ -1340,20 +1338,20 @@ def predictions_component_height(rows: pd.DataFrame, open_all: bool = False) -> 
         total_rows = int(group_sizes.sum())
         total_groups = int(len(group_sizes))
         feed_gaps = max(0, total_groups - 1)
-        table_header_height = 30
-        table_row_height = 28
-        section_chrome_height = 42
-        feed_gap_height = 11
+        table_header_height = 35
+        table_row_height = 60
+        section_chrome_height = 50
+        feed_gap_height = 12
         height = (
             total_groups * (section_chrome_height + table_header_height)
             + total_rows * table_row_height
             + feed_gaps * feed_gap_height
-            + 8
+            + 20
         )
-        return min(2600, max(110, height))
-    closed_height = 54 * len(group_sizes) + 30
-    open_height = min(390, 58 + (int(group_sizes.max()) + 1) * 35)
-    return min(900, max(180, closed_height + open_height))
+        return min(4000, max(120, height))
+    closed_height = 60 * len(group_sizes) + 40
+    open_height = min(600, 70 + (int(group_sizes.max()) + 1) * 60)
+    return min(1200, max(200, closed_height + open_height))
 
 
 def best_bets_match_key(row: pd.Series) -> str:
@@ -1385,7 +1383,7 @@ def render_best_bets_by_match(rows: pd.DataFrame, columns: list[str]) -> None:
         body = prediction_table_html(match_rows, columns, "Sem mercados.", sortable=True)
         sections.append(prediction_details_html(label, body, True, "predictions-match"))
     st.iframe(
-        predictions_component_src(f'<div class="predictions-feed">{"".join(sections)}</div>'),
+        predictions_component_src(f'<div class="predictions-feed">{"".join(sections)}</div>', auto_resize=True),
         width="stretch",
         height=predictions_component_height(grouped, open_all=True),
     )
@@ -3421,13 +3419,13 @@ def render_player_stats_cards(player_stats_df: pd.DataFrame, players_df: pd.Data
             if home_table.empty:
                 st.caption("Sem dados.")
             else:
-                st.dataframe(home_table, width="stretch", hide_index=True, height=dataframe_content_height(home_table, 110, 420))
+                st.dataframe(home_table, width="stretch", hide_index=True, height=dataframe_content_height(home_table, 110, 2500))
         with away_col:
             st.markdown("**Jogos como Visitante**")
             if away_table.empty:
                 st.caption("Sem dados.")
             else:
-                st.dataframe(away_table, width="stretch", hide_index=True, height=dataframe_content_height(away_table, 110, 420))
+                st.dataframe(away_table, width="stretch", hide_index=True, height=dataframe_content_height(away_table, 110, 2500))
 
 
 def render_player_stats_group(
