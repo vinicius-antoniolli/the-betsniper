@@ -32,7 +32,6 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 from src.dashboard.carbon_ui import (
     CARBON_IFRAME_CSS,
@@ -1267,10 +1266,9 @@ def render_best_bets_by_match(rows: pd.DataFrame, columns: list[str]) -> None:
         label = f"{best_bets_match_label(match_rows)} ({len(match_rows)})"
         body = prediction_table_html(match_rows, columns, "Sem mercados.", sortable=True)
         sections.append(prediction_details_html(label, body, True, "predictions-match"))
-    components.html(
+    st.iframe(
         predictions_component_document(f'<div class="predictions-feed">{"".join(sections)}</div>', auto_resize=True),
         height=predictions_component_height(grouped, open_all=True),
-        scrolling=True,
     )
 
 
@@ -3054,10 +3052,9 @@ def render_predictions_tab(matches_df: pd.DataFrame, prediction_rows: pd.DataFra
         body = "".join([game_html, teams_html, players_html])
         match_sections.append(prediction_details_html(title, body, False, "predictions-match"))
 
-    components.html(
+    st.iframe(
         predictions_component_document(f'<div class="predictions-feed">{"".join(match_sections)}</div>', auto_resize=True),
         height=predictions_component_height(prediction_rows, open_all=False),
-        scrolling=True,
     )
 
 
@@ -4341,7 +4338,6 @@ elif active_tab == "Estatísticas jogadores":
     filtered_matches, filtered_lineups, filtered_player_stats = apply_player_filters(matches, lineups, player_stats, filters)
     status_items = generic_filter_status(filters, len(filtered_lineups), len(lineups))
     render_filterbar(active_tab, status_items[:4])
-    from src.db.models import bool_from_db
     starters = int(filtered_lineups["starter"].apply(bool_from_db).sum()) if not filtered_lineups.empty and "starter" in filtered_lineups.columns else 0
     bench = max(0, len(filtered_lineups) - starters)
     legend_items = [
