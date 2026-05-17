@@ -16,7 +16,7 @@ from src.collectors.espn import (
     team_name,
 )
 from src.collectors.betfair_web import BetfairWebClient
-from src.db.models import Match, OddsSnapshot
+from src.db.models import AnalysisResult, Match, OddsSnapshot, PlayerLineup
 from src.db.session import get_session
 from src.etl.analysis import analyze_match
 from src.etl.helpers import (
@@ -27,6 +27,7 @@ from src.etl.helpers import (
     upsert_player_stat,
     upsert_team_stat,
 )
+from src.time_utils import match_kickoff_is_expired
 
 
 log = logging.getLogger(__name__)
@@ -103,6 +104,27 @@ def _espn_all_competition_history(
 def _event_local_date(event: dict) -> str:
     parsed_date = parse_iso_datetime(event.get("date"))
     return parsed_date.date().isoformat() if parsed_date else (event.get("date") or "")[:10]
+
+
+def _espn_source_match_id(event: dict) -> str:
+    competition = (event.get("competitions") or [{}])[0]
+    value = event.get("id") or competition.get("id")
+    return str(value) if value else ""
+
+
+def _espn_kickoff_at(event: dict) -> datetime | None:
+    competition = (event.get("competitions") or [{}])[0]
+    return parse_iso_datetime(event.get("date") or competition.get("date"))
+
+
+def _discard_expired_espn_match(session: Session, source_match_id: str) -> None:
+    if not source_match_id:
+        return
+    session.exec(delete(AnalysisResult).where(AnalysisResult.source_match_id == source_match_id))
+    session.exec(delete(PlayerLineup).where(PlayerLineup.source == "espn", PlayerLineup.source_match_id == source_match_id))
+    session.exec(delete(OddsSnapshot).where(OddsSnapshot.source_match_id == source_match_id))
+    session.exec(delete(Match).where(Match.source == "espn", Match.source_match_id == source_match_id))
+    session.commit()
 
 
 def _number_from_value(value: object) -> float | None:
@@ -386,6 +408,20 @@ def collect_fixtures_and_history(session: Session, target_date: str) -> list[Mat
 
         log.info("Jogos ESPN %s encontrados: %s", league.name, len(fixtures))
         for item in fixtures:
+            kickoff_at = _espn_kickoff_at(item)
+            if match_kickoff_is_expired(kickoff_at):
+                source_match_id = _espn_source_match_id(item)
+                home = team_name(competitor_by_home_away(item, "home"))
+                away = team_name(competitor_by_home_away(item, "away"))
+                log.info(
+                    "Jogo ESPN descartado por inicio ha mais de 2h: %s | %s x %s | %s",
+                    source_match_id,
+                    home,
+                    away,
+                    kickoff_at,
+                )
+                _discard_expired_espn_match(session, source_match_id)
+                continue
             match = _apply_league_label(session, upsert_match_from_espn(session, item, target_date), league)
             matches.append(match)
             all_matches.append(match)

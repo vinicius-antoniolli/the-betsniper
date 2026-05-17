@@ -26,6 +26,7 @@ from src.collectors.betfair_auth import (
 )
 from src.collectors.playwright_runtime import chromium_launch_options
 from src.db.models import Match
+from src.time_utils import match_kickoff_is_expired
 
 
 log = logging.getLogger(__name__)
@@ -180,6 +181,10 @@ class BetfairWebClient:
         if self.league_name:
             query = query.where(Match.league_name == self.league_name)
         rows = self.session.exec(query.order_by(Match.kickoff_at)).all()
+        active_rows = [row for row in rows if not match_kickoff_is_expired(row.kickoff_at)]
+        expired_count = len(rows) - len(active_rows)
+        if expired_count:
+            log.info("Betfair ignorou %s jogo(s) com inicio ha mais de 2h.", expired_count)
         return [
             BetfairMatch(
                 source_match_id=row.source_match_id,
@@ -187,7 +192,7 @@ class BetfairWebClient:
                 away_team=row.away_team,
                 commence_time=row.kickoff_at.isoformat() if row.kickoff_at else None,
             )
-            for row in rows
+            for row in active_rows
         ]
 
     def _event_url_map(self) -> dict[str, str]:

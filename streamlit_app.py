@@ -49,6 +49,7 @@ from src.domain import team_matchups as matchup_logic
 from src.domain.reasons import clean_reason_for_display, format_hits_with_samples, format_sample_value
 from src.domain.x_posts import XPostDraft, build_best_bet_x_posts
 from src.integrations.x_api import XCredentials, XPostError, publish_x_posts
+from src.time_utils import expired_match_cutoff
 
 
 ensure_runtime_dirs()
@@ -3512,17 +3513,21 @@ def best_bets_rows(rows: pd.DataFrame) -> pd.DataFrame:
     ).drop(columns=["market_key"], errors="ignore").reset_index(drop=True)
 
 
-TARGET_DATE_PARAMS = {
-    "today_date": TODAY_DATE,
-    "tomorrow_date": TOMORROW_DATE,
-    "stale_offset": f"-{settings.odds_stale_after_hours} hours",
-}
+def target_date_params() -> dict[str, Any]:
+    return {
+        "today_date": TODAY_DATE,
+        "tomorrow_date": TOMORROW_DATE,
+        "stale_offset": f"-{settings.odds_stale_after_hours} hours",
+        "expired_kickoff_cutoff": expired_match_cutoff().isoformat(sep=" ", timespec="seconds"),
+    }
+
 
 DASHBOARD_COUNTS_SQL = """
 with target_matches as (
   select source_match_id, target_date
   from matches
   where target_date in (:today_date, :tomorrow_date)
+    and (kickoff_at is null or datetime(kickoff_at) > :expired_kickoff_cutoff)
 ),
 latest_betfair_odds as (
   select
@@ -3554,11 +3559,19 @@ latest_betfair_odds as (
   where source = 'betfair-web'
     and (
       source_match_id in (select source_match_id from target_matches)
-      or date(commence_time) in (:today_date, :tomorrow_date)
+      or (
+        date(commence_time) in (:today_date, :tomorrow_date)
+        and datetime(commence_time) > :expired_kickoff_cutoff
+      )
     )
 )
 select
-  (select count(*) from analysis_results where target_date in (:today_date, :tomorrow_date)) as palpites,
+  (
+    select count(*)
+    from analysis_results ar
+    join target_matches tm on tm.source_match_id = ar.source_match_id
+    where ar.target_date in (:today_date, :tomorrow_date)
+  ) as palpites,
   (select count(*) from target_matches) as jogos,
   (select count(*) from latest_betfair_odds where rn = 1) as odds_snapshots,
   (select count(*) from latest_betfair_odds where rn = 1 and fetched_at < datetime('now', :stale_offset)) as odds_stale
@@ -3580,8 +3593,9 @@ select
   ar.reason,
   ar.created_at
 from analysis_results ar
-left join matches m on m.source_match_id = ar.source_match_id
+join matches m on m.source_match_id = ar.source_match_id
 where ar.target_date in (:today_date, :tomorrow_date)
+  and (m.kickoff_at is null or datetime(m.kickoff_at) > :expired_kickoff_cutoff)
 order by ar.target_date desc, score desc
 """
 
@@ -3589,10 +3603,17 @@ MATCHES_SQL = """
 select source_match_id, target_date, league_name, home_team, away_team, status, kickoff_at
 from matches
 where target_date in (:today_date, :tomorrow_date)
+  and (kickoff_at is null or datetime(kickoff_at) > :expired_kickoff_cutoff)
 order by target_date, kickoff_at
 """
 
 SNAPSHOTS_SQL = """
+with target_matches as (
+  select source, source_match_id, target_date
+  from matches
+  where target_date in (:today_date, :tomorrow_date)
+    and (kickoff_at is null or datetime(kickoff_at) > :expired_kickoff_cutoff)
+)
 select
   target_date,
   source,
@@ -3619,7 +3640,7 @@ select
 from (
   select
     coalesce(
-      (select m.target_date from matches m where m.source_match_id = odds_snapshots.source_match_id limit 1),
+      (select tm.target_date from target_matches tm where tm.source_match_id = odds_snapshots.source_match_id limit 1),
       date(commence_time)
     ) as target_date,
     source,
@@ -3644,7 +3665,7 @@ from (
         source,
         bookmaker,
         coalesce(
-          (select m.target_date from matches m where m.source_match_id = odds_snapshots.source_match_id limit 1),
+          (select tm.target_date from target_matches tm where tm.source_match_id = odds_snapshots.source_match_id limit 1),
           date(commence_time)
         ),
         market_key,
@@ -3661,10 +3682,11 @@ from (
   from odds_snapshots
   where source = 'betfair-web'
     and (
-      source_match_id in (
-        select source_match_id from matches where target_date in (:today_date, :tomorrow_date)
+      source_match_id in (select source_match_id from target_matches)
+      or (
+        date(commence_time) in (:today_date, :tomorrow_date)
+        and datetime(commence_time) > :expired_kickoff_cutoff
       )
-      or date(commence_time) in (:today_date, :tomorrow_date)
     )
 )
 where rn = 1
@@ -3672,6 +3694,12 @@ order by fetched_at desc
 """
 
 LINEUPS_SQL = """
+with target_matches as (
+  select source, source_match_id, target_date
+  from matches
+  where target_date in (:today_date, :tomorrow_date)
+    and (kickoff_at is null or datetime(kickoff_at) > :expired_kickoff_cutoff)
+)
 select
   l.source_match_id,
   l.player_name,
@@ -3681,20 +3709,24 @@ select
   l.jersey,
   coalesce(m.target_date, '') as match_date
 from player_lineups l
-left join matches m
+left join target_matches m
   on m.source = l.source
  and m.source_match_id = l.source_match_id
-where l.source_match_id in (
-  select source_match_id from matches where target_date in (:today_date, :tomorrow_date)
-)
+where l.source_match_id in (select source_match_id from target_matches)
 order by l.team_name, l.starter desc, l.player_name
 """
 
 TEAM_STATS_SQL = """
 with target_teams as (
-  select home_team as team_name from matches where target_date in (:today_date, :tomorrow_date)
+  select home_team as team_name
+  from matches
+  where target_date in (:today_date, :tomorrow_date)
+    and (kickoff_at is null or datetime(kickoff_at) > :expired_kickoff_cutoff)
   union
-  select away_team as team_name from matches where target_date in (:today_date, :tomorrow_date)
+  select away_team as team_name
+  from matches
+  where target_date in (:today_date, :tomorrow_date)
+    and (kickoff_at is null or datetime(kickoff_at) > :expired_kickoff_cutoff)
 )
 select
   source,
@@ -3735,9 +3767,15 @@ order by match_date desc
 
 PLAYER_STATS_SQL = """
 with target_teams as (
-  select home_team as team_name from matches where target_date in (:today_date, :tomorrow_date)
+  select home_team as team_name
+  from matches
+  where target_date in (:today_date, :tomorrow_date)
+    and (kickoff_at is null or datetime(kickoff_at) > :expired_kickoff_cutoff)
   union
-  select away_team as team_name from matches where target_date in (:today_date, :tomorrow_date)
+  select away_team as team_name
+  from matches
+  where target_date in (:today_date, :tomorrow_date)
+    and (kickoff_at is null or datetime(kickoff_at) > :expired_kickoff_cutoff)
 )
 select
   p.source,
@@ -3808,7 +3846,7 @@ def render_day_expanders(
 
 
 def load_dashboard_counts() -> tuple[int, int, int, int]:
-    counts = read_sql(DASHBOARD_COUNTS_SQL, TARGET_DATE_PARAMS)
+    counts = read_sql(DASHBOARD_COUNTS_SQL, target_date_params())
     if counts.empty:
         return 0, 0, 0, 0
 
@@ -3825,27 +3863,27 @@ def load_dashboard_counts() -> tuple[int, int, int, int]:
 
 
 def load_results() -> pd.DataFrame:
-    return read_sql(RESULTS_SQL, TARGET_DATE_PARAMS)
+    return read_sql(RESULTS_SQL, target_date_params())
 
 
 def load_matches() -> pd.DataFrame:
-    return read_sql(MATCHES_SQL, TARGET_DATE_PARAMS)
+    return read_sql(MATCHES_SQL, target_date_params())
 
 
 def load_snapshots() -> pd.DataFrame:
-    return read_sql(SNAPSHOTS_SQL, TARGET_DATE_PARAMS)
+    return read_sql(SNAPSHOTS_SQL, target_date_params())
 
 
 def load_lineups() -> pd.DataFrame:
-    return read_sql(LINEUPS_SQL, TARGET_DATE_PARAMS)
+    return read_sql(LINEUPS_SQL, target_date_params())
 
 
 def load_team_stats() -> pd.DataFrame:
-    return read_sql(TEAM_STATS_SQL, TARGET_DATE_PARAMS)
+    return read_sql(TEAM_STATS_SQL, target_date_params())
 
 
 def load_player_stats() -> pd.DataFrame:
-    return read_sql(PLAYER_STATS_SQL, TARGET_DATE_PARAMS)
+    return read_sql(PLAYER_STATS_SQL, target_date_params())
 
 
 def load_display_results() -> tuple[pd.DataFrame, pd.DataFrame]:
