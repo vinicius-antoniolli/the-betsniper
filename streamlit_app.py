@@ -1366,7 +1366,10 @@ def best_bets_match_label(rows: pd.DataFrame) -> str:
     data = str(row.get("Data") or "").strip()
     home = str(row.get("Casa") or "").strip()
     away = str(row.get("Fora") or "").strip()
+    liga = str(row.get("Liga") or "").strip()
     title = f"{home} x {away}" if home and away else home or away or "Jogo"
+    if liga:
+        title = f"{title} ({liga})"
     return f"{data} | {title}" if data else title
 
 
@@ -1520,10 +1523,18 @@ def render_best_bets_tab(rows: pd.DataFrame, key_prefix: str = "best_bets") -> N
             if group_rows.empty:
                 st.caption("Sem mercados.")
             else:
+                exclude_cols = {"_target_date", "_source_match_id", "market_key"}
+                if group_name == "Jogos":
+                    exclude_cols.update({"Data", "Liga", "Casa", "Fora", "Tipo", "Time"})
+                elif group_name == "Times":
+                    exclude_cols.update({"Data", "Liga", "Casa", "Fora", "Tipo"})
+                elif group_name == "Jogadores":
+                    exclude_cols.update({"Data", "Liga", "Casa", "Fora", "Tipo", "Time"})
+
                 display_columns = [
                     column
                     for column in BEST_BETS_COLUMNS
-                    if column in group_rows.columns and column not in {"_target_date", "_source_match_id", "market_key"}
+                    if column in group_rows.columns and column not in exclude_cols
                 ]
                 render_best_bets_by_match(group_rows, display_columns)
 
