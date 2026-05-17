@@ -5,12 +5,13 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
 PUBLIC_DB = ROOT_DIR / "public_data" / "betsniper_public.db"
+TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 
 # os.environ["PUBLIC_VIEWER_MODE"] = "true"
 # os.environ["BETFAIR_WEB_ENABLED"] = "false"
 # os.environ["X_AUTO_PUBLISH_ENABLED"] = "false"
 
-if PUBLIC_DB.exists():
+if os.environ.get("PUBLIC_VIEWER_MODE", "").strip().lower() in TRUE_ENV_VALUES and PUBLIC_DB.exists():
     os.environ.setdefault("APP_DB_URL", "sqlite:///public_data/betsniper_public.db")
 
 

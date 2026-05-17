@@ -99,6 +99,8 @@ class PublicExportTests(unittest.TestCase):
             payload = export_public_snapshot(source, output, metadata, base_date="2026-05-15", days=2)
 
             self.assertEqual(payload["base_date"], "2026-05-15")
+            self.assertEqual(payload["output_size_bytes"], output.stat().st_size)
+            self.assertFalse((root / "public.compact.db").exists())
             with closing(sqlite3.connect(output)) as conn:
                 self.assertEqual(conn.execute("SELECT count(*) FROM matches").fetchone()[0], 1)
                 self.assertEqual(conn.execute("SELECT count(*) FROM analysis_results").fetchone()[0], 1)

@@ -83,7 +83,7 @@ def prepare_dashboard_data(args: argparse.Namespace, run_once: bool = False) -> 
 def render_app_in_current_streamlit_process(args: argparse.Namespace) -> None:
     dates = prepare_dashboard_data(args, run_once=True)
     apply_dashboard_base_date(dates[0])
-    runpy.run_path(str(ROOT_DIR / "app.py"), run_name="__main__")
+    runpy.run_path(str(ROOT_DIR / "streamlit_app.py"), run_name="__main__")
 
 
 def main() -> None:

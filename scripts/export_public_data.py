@@ -59,6 +59,10 @@ def _quote_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def _quote_sql_string(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
 def _columns(conn: sqlite3.Connection, schema: str, table: str) -> list[str]:
     return [row[1] for row in conn.execute(f"PRAGMA {_quote_ident(schema)}.table_info({_quote_ident(table)})")]
 
@@ -74,6 +78,19 @@ def _create_empty_db(output_db: Path) -> None:
             run_sqlite_migrations(conn)
     finally:
         engine.dispose()
+
+
+def _vacuum_sqlite_file(db_path: Path) -> None:
+    compact_path = db_path.with_name(f"{db_path.stem}.compact{db_path.suffix}")
+    if compact_path.exists():
+        compact_path.unlink()
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.execute(f"VACUUM INTO {_quote_sql_string(str(compact_path))}")
+    try:
+        compact_path.replace(db_path)
+    except PermissionError:
+        db_path.unlink()
+        compact_path.rename(db_path)
 
 
 def _copy_selected(
@@ -256,7 +273,8 @@ def export_public_snapshot(
         _shrink_public_raw_json(conn)
         conn.commit()
         conn.execute("DETACH DATABASE src")
-        conn.execute("VACUUM")
+
+    _vacuum_sqlite_file(output_db)
 
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, object] = {

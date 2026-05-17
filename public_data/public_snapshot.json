@@ -1,20 +1,20 @@
 {
-  "generated_at": "2026-05-15T18:01:25-03:00",
-  "base_date": "2026-05-15",
+  "generated_at": "2026-05-17T16:56:06-03:00",
+  "base_date": "2026-05-17",
   "days": 2,
   "dates": [
-    "2026-05-15",
-    "2026-05-16"
+    "2026-05-17",
+    "2026-05-18"
   ],
   "source_db": "data/betsniper.db",
   "output_db": "public_data/betsniper_public.db",
-  "output_size_bytes": 6410240,
+  "output_size_bytes": 29229056,
   "counts": {
-    "matches": 9,
-    "analysis_results": 27,
-    "player_lineups": 40,
-    "odds_snapshots": 2986,
-    "team_stats": 279,
-    "player_stats": 6014
+    "matches": 29,
+    "analysis_results": 87,
+    "player_lineups": 421,
+    "odds_snapshots": 15376,
+    "team_stats": 1119,
+    "player_stats": 23908
   }
 }
