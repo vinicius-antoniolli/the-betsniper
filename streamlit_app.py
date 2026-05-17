@@ -1,34 +1,17 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
+from src.dashboard.bootstrap import configure_public_viewer_database
 
-ROOT_DIR = Path(__file__).resolve().parent
-PUBLIC_DB = ROOT_DIR / "public_data" / "betsniper_public.db"
-TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
-
-# os.environ["PUBLIC_VIEWER_MODE"] = "true"
-# os.environ["BETFAIR_WEB_ENABLED"] = "false"
-# os.environ["X_AUTO_PUBLISH_ENABLED"] = "false"
-
-if os.environ.get("PUBLIC_VIEWER_MODE", "").strip().lower() in TRUE_ENV_VALUES and PUBLIC_DB.exists():
-    os.environ.setdefault("APP_DB_URL", "sqlite:///public_data/betsniper_public.db")
-
+configure_public_viewer_database()
 
 import hashlib
-import hmac
-import json
 import logging
 import re
 from base64 import b64encode
 from collections.abc import Callable
-from datetime import datetime, timedelta
-from functools import lru_cache
+from datetime import timedelta
 from html import escape
-from pathlib import Path
 from typing import Any
-from unicodedata import normalize
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -41,8 +24,50 @@ from src.dashboard.carbon_ui import (
     render_legend,
     render_main_heading,
 )
-from config import ROOT_DIR, ensure_runtime_dirs, settings
+from config import ensure_runtime_dirs, settings
+from src.dashboard.constants import (
+    BEST_BETS_COLUMNS,
+    GAME_COLUMNS,
+    GAME_MARKET_COLUMNS,
+    GAME_MARKETS,
+    GAME_SECTIONS,
+    MIN_SCORE_SAMPLES,
+    MODEL_LINES,
+    PLAYER_COLUMNS,
+    PLAYER_MARKET_COLUMNS,
+    PLAYER_MARKETS,
+    PLAYER_REQUESTED_MARKETS,
+    PLAYER_SCORE_ATTRS,
+    PLAYER_STAT_CATEGORIES,
+    POPULAR_PLAYER_MARKETS,
+    SCORE_SAMPLE_LIMIT,
+    SOURCE_LABELS,
+    SOURCE_PRIORITY,
+    STATS_DISPLAY_GAMES,
+    TABLE_5_ROWS_HEIGHT,
+    TEAM_COLUMNS,
+    TEAM_MARKET_COLUMNS,
+    TEAM_PREDICTION_COLUMNS,
+    TEAM_SCORE_ATTRS,
+    TEAM_STAT_CATEGORIES,
+    UNSUPPORTED_COMPOUND_MARKET_TOKENS,
+    UNSUPPORTED_PLAYER_PERIOD_TOKENS,
+)
 from src.dashboard.data import read_sql_frame
+from src.dashboard.dates import dashboard_base_date
+from src.dashboard.odds import (
+    add_display_columns,
+    snapshot_matches_game,
+    snapshot_raw,
+    team_goal_market_key,
+    team_goal_market_side,
+)
+from src.dashboard.text_utils import format_match_date, parse_datetime, plain_text, teams_match, teams_pair_match
+from src.dashboard.x_publish_ui import (
+    ensure_x_publish_unlocked,
+    is_x_publish_unlocked,
+    render_x_publish_unlock_control,
+)
 from src.db.session import init_db, sqlite_db_path
 from src.domain import scoring as score_logic
 from src.domain import team_matchups as matchup_logic
@@ -59,109 +84,10 @@ DB_PATH = sqlite_db_path()
 log = logging.getLogger(__name__)
 
 
-def _rooted_path(value: str) -> Path:
-    path = Path(value)
-    return path if path.is_absolute() else ROOT_DIR / path
-
-
-def _public_snapshot_base_date() -> str | None:
-    if not settings.public_viewer_mode:
-        return None
-    metadata_path = _rooted_path(settings.public_snapshot_metadata)
-    try:
-        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    base_date = str(payload.get("base_date") or "").strip()
-    if not base_date:
-        return None
-    try:
-        datetime.fromisoformat(base_date)
-    except ValueError:
-        return None
-    return base_date
-
-
-def dashboard_base_date():
-    if settings.dashboard_base_date:
-        try:
-            return datetime.fromisoformat(settings.dashboard_base_date).date()
-        except ValueError:
-            log.warning("DASHBOARD_BASE_DATE invalido: %s", settings.dashboard_base_date)
-    public_base_date = _public_snapshot_base_date()
-    if public_base_date:
-        return datetime.fromisoformat(public_base_date).date()
-    return datetime.now(ZoneInfo(settings.app_timezone)).date()
-
-
 BASE_DATE = dashboard_base_date()
 TODAY_DATE = BASE_DATE.isoformat()
 TOMORROW_DATE = (BASE_DATE + timedelta(days=1)).isoformat()
-X_PUBLISH_UNLOCKED_KEY = "x_publish_unlocked"
-X_PUBLISH_UNLOCK_REQUESTED_KEY = "x_publish_unlock_requested"
-X_PUBLISH_PASSWORD_INPUT_KEY = "x_publish_password_input"
-
-
-def is_x_publish_unlocked() -> bool:
-    return bool(st.session_state.get(X_PUBLISH_UNLOCKED_KEY))
-
-
-def ensure_x_publish_unlocked() -> bool:
-    if is_x_publish_unlocked():
-        return True
-    st.error("Publicacao no X bloqueada. Libere com a senha antes de publicar.")
-    return False
-
-
-def render_x_publish_unlock_control() -> None:
-    if is_x_publish_unlocked():
-        return
-
-    with st.container(key="x_publish_unlock_slot"):
-        if st.button("Login", key="x_publish_unlock_button"):
-            st.session_state[X_PUBLISH_UNLOCK_REQUESTED_KEY] = True
-
-    if not st.session_state.get(X_PUBLISH_UNLOCK_REQUESTED_KEY):
-        return
-
-    with st.form("x_publish_unlock_form", clear_on_submit=False):
-        password = st.text_input(
-            "Senha para liberar publicacao no X",
-            type="password",
-            key=X_PUBLISH_PASSWORD_INPUT_KEY,
-        )
-        submitted = st.form_submit_button("Liberar X")
-
-    if not submitted:
-        return
-
-    configured_password = settings.x_publish_password or ""
-    if not configured_password:
-        st.error("Configure X_PUBLISH_PASSWORD no .env para liberar publicacao no X.")
-        return
-    if hmac.compare_digest(password or "", configured_password):
-        st.session_state[X_PUBLISH_UNLOCKED_KEY] = True
-        st.session_state[X_PUBLISH_UNLOCK_REQUESTED_KEY] = False
-        st.rerun()
-        return
-
-    st.error("Senha incorreta.")
-
 DASHBOARD_DAYS = ((TODAY_DATE, "Hoje"), (TOMORROW_DATE, "Amanhã"))
-
-
-def render_x_publish_auth_css() -> None:
-    toolbar_display = "flex" if is_x_publish_unlocked() else "none"
-    st.markdown(
-        f"""
-        <style>
-        [data-testid="stToolbar"] {{
-          display: {toolbar_display} !important;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 st.set_page_config(page_title="Betsniper", layout="wide")
@@ -503,384 +429,6 @@ def read_sql(query: str, params: SqlParams = None) -> pd.DataFrame:
         with st.expander("SQL com erro", expanded=False):
             st.code(query, language="sql")
         return pd.DataFrame()
-
-
-@lru_cache(maxsize=20000)
-def _plain_text_cached(text: str) -> str:
-    # Normalize unicode (NFKD) and remove non-ascii, then lowercase
-    text = normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower()
-    # Replace all non-alphanumeric with spaces and collapse spaces
-    text = re.sub(r"[^a-z0-9]+", " ", text).strip()
-    return text
-
-
-def plain_text(value: object) -> str:
-    return _plain_text_cached("" if value is None else str(value))
-
-
-TEAM_TOKEN_ALIASES = {
-    "mg": "mineiro",
-    "pr": "paranaense",
-}
-TEAM_TOKEN_STOPWORDS = {"ac", "club", "clube", "ec", "fc", "sc", "da", "de", "do", "das", "dos"}
-
-
-@lru_cache(maxsize=20000)
-def _team_tokens_cached(value: str) -> tuple[str, ...]:
-    text = re.sub(r"[^a-z0-9]+", " ", plain_text(value))
-    return tuple(
-        TEAM_TOKEN_ALIASES.get(token, token)
-        for token in text.split()
-        if token and token not in TEAM_TOKEN_STOPWORDS
-    )
-
-
-def team_tokens(value: object) -> set[str]:
-    return set(_team_tokens_cached("" if value is None else str(value)))
-
-
-def parse_datetime(series: pd.Series) -> pd.Series:
-    return pd.to_datetime(series, errors="coerce")
-
-
-def odds_freshness_counts(rows: pd.DataFrame) -> tuple[int, int]:
-    if rows.empty or "odds_stale" not in rows.columns:
-        return 0, 0
-    stale = pd.to_numeric(rows["odds_stale"], errors="coerce").fillna(0).astype(int)
-    stale_count = int(stale.sum())
-    return len(rows) - stale_count, stale_count
-
-
-def format_match_date(row: pd.Series) -> str:
-    kickoff = row.get("kickoff_at")
-    if pd.notna(kickoff):
-        if not hasattr(kickoff, "strftime"):
-            kickoff = pd.to_datetime(kickoff, errors="coerce")
-    if pd.notna(kickoff):
-        return kickoff.strftime("%d/%m - %H:%M")
-    target_date = row.get("target_date")
-    parsed = pd.to_datetime(target_date, errors="coerce")
-    return parsed.strftime("%d/%m") if pd.notna(parsed) else str(target_date)
-
-
-def market_targets(row: pd.Series) -> list[tuple[str, str, float | None]]:
-    market_key = row.get("market_key")
-    pick = plain_text(row.get("pick"))
-    if market_key == "btts":
-        return [("btts", "yes" if pick in {"sim", "yes"} else pick, None)]
-    if market_key == "over_15":
-        return [("alternate_totals", "over", 1.5), ("totals", "over", 1.5)]
-    if market_key == "over_25":
-        return [("totals", "over", 2.5), ("alternate_totals", "over", 2.5)]
-    return [(str(market_key), pick, None)]
-
-
-def team_goal_market_side(raw: dict | None = None, market_name: object = None, market_type_raw: object = None) -> str | None:
-    raw = raw or {}
-    raw_type = str(market_type_raw or raw.get("market_type_raw") or "").upper()
-    text = plain_text(market_name or raw.get("market_name") or "")
-    if not (raw_type.endswith("_GOALS") or "goal" in text or "gol" in text):
-        return None
-    if raw_type.startswith("HOME_TEAM_OVER/UNDER") or "time da casa com mais/menos" in text or "home team over/under" in text:
-        return "home"
-    if raw_type.startswith("AWAY_TEAM_OVER/UNDER") or "time visitante com mais/menos" in text or "away team over/under" in text:
-        return "away"
-    return None
-
-
-def team_goal_market_key(side: str | None) -> str | None:
-    if side == "home":
-        return "teamtotals-goals-team1"
-    if side == "away":
-        return "teamtotals-goals-team2"
-    return None
-
-
-@lru_cache(maxsize=50000)
-def _teams_match_cached(left: str, right: str) -> bool:
-    a = plain_text(left)
-    b = plain_text(right)
-    if not a or not b:
-        return False
-    if a == b:
-        return True
-    left_tokens = team_tokens(left)
-    right_tokens = team_tokens(right)
-    return bool(left_tokens and right_tokens and (left_tokens <= right_tokens or right_tokens <= left_tokens))
-
-
-def teams_match(left: object, right: object) -> bool:
-    return _teams_match_cached("" if left is None else str(left), "" if right is None else str(right))
-
-
-def teams_pair_match(left_home: object, left_away: object, right_home: object, right_away: object) -> bool:
-    direct = teams_match(left_home, right_home) and teams_match(left_away, right_away)
-    reverse = teams_match(left_home, right_away) and teams_match(left_away, right_home)
-    return direct or reverse
-
-
-def snapshot_raw(row: pd.Series) -> dict:
-    try:
-        return json.loads(row.get("raw_json") or "{}")
-    except json.JSONDecodeError:
-        return {}
-
-
-def snapshot_matches_game(row: pd.Series, match: pd.Series) -> bool:
-    raw = snapshot_raw(row)
-    home = raw.get("home_team")
-    away = raw.get("away_team")
-    if not home:
-        home = row.get("raw_home_team")
-    if not away:
-        away = row.get("raw_away_team")
-    return teams_pair_match(home, away, match.get("home_team"), match.get("away_team"))
-
-
-def odds_match_index(snapshots_df: pd.DataFrame) -> dict[tuple[str, str, str, str, float | None], float]:
-    odds_by_line: dict[tuple[str, str, str, str, float | None], float] = {}
-    if snapshots_df.empty:
-        return odds_by_line
-
-    snapshots_df = snapshots_df.copy()
-    snapshots_df["fetched_at"] = parse_datetime(snapshots_df["fetched_at"])
-    snapshots_df = snapshots_df.sort_values("fetched_at")
-
-    for _, row in snapshots_df.iterrows():
-        try:
-            raw = json.loads(row.get("raw_json") or "{}")
-        except json.JSONDecodeError:
-            continue
-
-        home = plain_text(raw.get("home_team"))
-        away = plain_text(raw.get("away_team"))
-        market = str(row.get("market_key") or "")
-        outcome = plain_text(row.get("outcome_name"))
-        if market == "totals" and team_goal_market_side(raw, row.get("market_name"), row.get("market_type_raw")):
-            continue
-        point = row.get("point")
-        point_key = None if pd.isna(point) else float(point)
-        price = row.get("price")
-        if pd.isna(price):
-            continue
-
-        key = (home, away, market, outcome, point_key)
-        odds_by_line[key] = max(float(price), odds_by_line.get(key, 0.0))
-        reverse_key = (away, home, market, outcome, point_key)
-        odds_by_line[reverse_key] = max(float(price), odds_by_line.get(reverse_key, 0.0))
-
-    return odds_by_line
-
-
-def add_display_columns(results_df: pd.DataFrame, odds_df: pd.DataFrame) -> pd.DataFrame:
-    if results_df.empty:
-        return results_df
-
-    display = results_df.copy()
-    display["kickoff_at"] = parse_datetime(display["kickoff_at"])
-    odds_by_line = odds_match_index(odds_df)
-
-    def odd_for(row: pd.Series) -> str:
-        home = plain_text(row.get("home_team"))
-        away = plain_text(row.get("away_team"))
-        for market, outcome, point in market_targets(row):
-            value = odds_by_line.get((home, away, market, outcome, point))
-            if value is not None:
-                return f"{value:.2f}"
-        return "N/D"
-
-    display.insert(0, "Data", display.apply(format_match_date, axis=1))
-    display["ODD"] = display.apply(odd_for, axis=1)
-    return display.rename(
-        columns={
-            "league_name": "Liga",
-            "home_team": "Casa",
-            "away_team": "Fora",
-            "pick": "Pick",
-            "score": "Score",
-            "reason": "Motivo",
-        }
-    )
-
-
-def public_results(display: pd.DataFrame) -> pd.DataFrame:
-    if display.empty:
-        return display
-    return display[["Data", "Liga", "Casa", "Fora", "Pick", "ODD", "Score", "Motivo"]]
-
-
-GAME_COLUMNS = ["Data", "Liga", "Casa", "Fora", "Time", "Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
-GAME_MARKET_COLUMNS = ["Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
-TEAM_COLUMNS = ["Time", "Mercado", "Pick", "Linha", "Odd", "Score", "Motivo"]
-TEAM_PREDICTION_COLUMNS = ["Time", "Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
-TEAM_MARKET_COLUMNS = ["Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
-PLAYER_COLUMNS = ["Jogador", "Time", "Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
-PLAYER_MARKET_COLUMNS = ["Jogador", "Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
-BEST_BETS_COLUMNS = [
-    "Data",
-    "Liga",
-    "Casa",
-    "Fora",
-    "Tipo",
-    "Time",
-    "Jogador",
-    "Mercado",
-    "Pick",
-    "Linha",
-    "ODD",
-    "Score",
-    "Motivo",
-]
-PLAYER_REQUESTED_MARKETS = ["Faltas cometidas", "Faltas sofridas", "Finalizações", "Chutes a gol"]
-TABLE_5_ROWS_HEIGHT = 215
-
-
-PLAYER_MARKETS = {
-    "players-shots": "Finalizações",
-    "playertotals-shots": "Finalizações",
-    "betfair-player-shots": "Finalizações",
-    "players-shotsongoal": "Chutes a gol",
-    "playertotals-shotsongoal": "Chutes a gol",
-    "betfair-player-shots-on-target": "Chutes a gol",
-    "players-foulscommitted": "Faltas cometidas",
-    "playertotals-foulscommitted": "Faltas cometidas",
-    "betfair-player-fouls-committed": "Faltas cometidas",
-    "betfair-player-fouls-suffered": "Faltas sofridas",
-}
-
-POPULAR_PLAYER_MARKETS = {
-    "betfair-popular-marcador-a-qualquer-momento": ("Gols", "goals"),
-    "betfair-popular-primeiro-jogador-a-marcar": ("Gols", "goals"),
-    "betfair-popular-primeiro-marcador-do-gol": ("Gols", "goals"),
-    "betfair-popular-assistencia-a-qualquer-momento": ("Assistencias", "assists"),
-    "betfair-popular-recebe-um-cartao": ("Cartoes", "cards"),
-    "betfair-popular-marca-ou-faz-assistencia": ("Gol ou assistencia", "goals_or_assists"),
-}
-
-MODEL_LINES = {
-    "over_15": "1.5",
-    "over_25": "2.5",
-    "btts": "Sim",
-}
-
-TEAM_SCORE_ATTRS = {
-    "Gols marcados": "goals_for",
-    "Gols sofridos": "goals_against",
-    "Escanteios a favor": "corners_for",
-    "Escanteios contra": "corners_against",
-    "Escanteios totais": "corners_total",
-    "Cartões a favor": "cards_for",
-    "Cartões contra": "cards_against",
-    "Cartões totais": "cards_total",
-    "Finalizações Totais": "shots_total_for",
-    "Finalizações Contra": "shots_total_against",
-    "Finalizações por time": "shots_total_for",
-    "Chutes no gol a favor": "shots_on_target_for",
-    "Chutes no gol contra": "shots_on_target_against",
-    "Chutes no gol por time": "shots_on_target_for",
-    "Impedimentos a favor": "offsides_for",
-    "Impedimentos contra": "offsides_against",
-    "Arremessos Laterais": "throw_ins_for",
-    "Gols no 1º Tempo a favor": "first_half_goals_for",
-    "Gols no 1º Tempo contra": "first_half_goals_against",
-    "Escanteios no 1º Tempo a favor": "first_half_corners_for",
-    "Escanteios no 1º Tempo contra": "first_half_corners_against",
-    "xG a favor": "xg_for",
-    "xG contra": "xg_against",
-    "Faltas cometidas": "fouls_committed",
-    "Faltas sofridas": "fouls_suffered",
-}
-
-TEAM_STAT_CATEGORIES = [
-    ("Gols marcados", "goals_for"),
-    ("Gols Sofridos", "goals_against"),
-    ("Gols no 1º Tempo a favor", "first_half_goals_for"),
-    ("Gols no 1º Tempo contra", "first_half_goals_against"),
-    ("Escanteios a favor", "corners_for"),
-    ("Escanteios contra", "corners_against"),
-    ("Escanteios no 1º Tempo a favor", "first_half_corners_for"),
-    ("Escanteios no 1º Tempo contra", "first_half_corners_against"),
-    ("Cartões a favor", "cards_for"),
-    ("Cartões contra", "cards_against"),
-    ("Finalizações Totais", "shots_total_for"),
-    ("Finalizações Contra", "shots_total_against"),
-    ("Chutes no gol a favor", "shots_on_target_for"),
-    ("Chutes no gol contra", "shots_on_target_against"),
-    ("Impedimentos a favor", "offsides_for"),
-    ("Impedimentos contra", "offsides_against"),
-    ("Arremessos Laterais", "throw_ins_for"),
-    ("Faltas cometidas", "fouls_committed"),
-    ("Faltas sofridas", "fouls_suffered"),
-    ("xG a favor", "xg_for"),
-    ("xG contra", "xg_against"),
-]
-
-PLAYER_SCORE_ATTRS = {
-    "Gols": "goals",
-    "Gol ou assistencia": "goals_or_assists",
-    "Assistências": "assists",
-    "Finalizações": "shots",
-    "Chutes a gol": "shots_on_target",
-    "Faltas cometidas": "fouls",
-    "Faltas sofridas": "fouls_suffered",
-    "Envolvimentos em faltas": "foul_involvements",
-    "Cartoes": "cards",
-    "Cartão Amarelo": "yellow_cards",
-    "Cartão Vermelho": "red_cards",
-}
-
-PLAYER_STAT_CATEGORIES = [
-    ("Gols", "goals"),
-    ("Assistências", "assists"),
-    ("Finalizações", "shots"),
-    ("Chutes a gol", "shots_on_target"),
-    ("Faltas cometidas", "fouls"),
-    ("Faltas sofridas", "fouls_suffered"),
-    ("Cartão Amarelo", "yellow_cards"),
-    ("Cartão Vermelho", "red_cards"),
-]
-
-GAME_MARKETS = {
-    "totals": "Gols totais",
-    "teamtotals-goals-team1": "Gols marcados",
-    "teamtotals-goals-team2": "Gols marcados",
-    "btts": "Ambas marcam",
-    "betfair-result": "Resultado final",
-    "betfair-double-chance": "Chance dupla",
-    "betfair-draw-no-bet": "Empate sem aposta",
-    "betfair-goalkeeper-saves": "Defesas do goleiro",
-    "betfair-team-shots": "Finalizações por time",
-    "betfair-team-shots-on-target": "Chutes no gol por time",
-    "totals-corners": "Escanteios totais",
-    "teamtotals-corners-team1": "Escanteios a favor",
-    "teamtotals-corners-team2": "Escanteios a favor",
-    "totals-bookings": "Cartões totais",
-    "teamtotals-bookings-team1": "Cartões a favor",
-    "teamtotals-bookings-team2": "Cartões a favor",
-}
-
-GAME_SECTIONS = ["Gols", "Escanteios", "Cartões", "Outros"]
-SOURCE_PRIORITY = {"espn": 0}
-SOURCE_LABELS = {"espn": "ESPN"}
-MIN_SCORE_SAMPLES = 3
-SCORE_SAMPLE_LIMIT = 10
-STATS_DISPLAY_GAMES = SCORE_SAMPLE_LIMIT
-UNSUPPORTED_COMPOUND_MARKET_TOKENS = (
-    "cotacoes aumentadas",
-    "combinadas",
-    "combinadas especiais",
-    "escanteios e cartoes",
-    "cabec",
-    "fora da area",
-)
-UNSUPPORTED_PLAYER_PERIOD_TOKENS = (
-    "1o tempo",
-    "1 tempo",
-    "primeiro tempo",
-    "2o tempo",
-    "2 tempo",
-    "segundo tempo",
-)
 
 
 def format_point(value: object) -> str:

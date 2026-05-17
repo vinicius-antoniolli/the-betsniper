@@ -1,5 +1,11 @@
-from src.collectors.betfair_web import BetfairWebClient, BetfairMatch
 import os
+
+from _paths import ensure_project_imports
+
+ensure_project_imports()
+
+from src.collectors.betfair_web import BetfairMatch, BetfairWebClient
+
 os.environ["PUBLIC_VIEWER_MODE"] = "true"
 
 client = BetfairWebClient(None, "2026-05-15")

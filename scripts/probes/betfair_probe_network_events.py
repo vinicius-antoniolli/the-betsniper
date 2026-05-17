@@ -1,6 +1,12 @@
-from src.collectors.betfair_web import BetfairWebClient, BetfairMatch
-import os
 import httpx
+import os
+
+from _paths import ensure_project_imports
+
+ensure_project_imports()
+
+from src.collectors.betfair_web import BetfairMatch, BetfairWebClient
+
 os.environ["PUBLIC_VIEWER_MODE"] = "true"
 
 class MockClient(BetfairWebClient):
