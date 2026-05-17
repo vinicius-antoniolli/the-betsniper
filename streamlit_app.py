@@ -31,7 +31,20 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
+from src.dashboard.carbon_ui import (
+    CARBON_IFRAME_CSS,
+    best_bet_detail_items,
+    generic_detail_items,
+    render_carbon_theme_css,
+    render_detail_panel,
+    render_filterbar,
+    render_header,
+    render_legend,
+    render_main_heading,
+    render_sidebar,
+)
 from config import ROOT_DIR, ensure_runtime_dirs, settings
 from src.dashboard.data import read_sql_frame
 from src.db.session import init_db, sqlite_db_path
@@ -464,10 +477,9 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-render_x_publish_auth_css()
+render_carbon_theme_css(is_x_publish_unlocked())
 render_x_publish_unlock_control()
-render_x_publish_auth_css()
-st.markdown("<h1 style='text-align: center; padding-bottom: 0.5rem;'>Betsniper</h1>", unsafe_allow_html=True)
+render_carbon_theme_css(is_x_publish_unlocked())
 
 
 SqlParams = dict[str, Any] | tuple[Any, ...] | list[Any] | None
@@ -1119,138 +1131,7 @@ def predictions_component_document(body: str, auto_resize: bool = False) -> str:
 <head>
   <meta charset="utf-8">
   <style>
-    html,
-    body {{
-      background: rgb(14, 17, 23);
-      color: rgb(250, 250, 250);
-      font-family: "Source Sans Pro", sans-serif;
-      margin: 0;
-      padding: 0;
-    }}
-
-    .predictions-feed {{
-      display: grid;
-      gap: 0.65rem;
-    }}
-
-    .predictions-match,
-    .predictions-section {{
-      background: rgb(14, 17, 23);
-      border: 1px solid rgba(250, 250, 250, 0.18);
-      border-radius: 0.45rem;
-    }}
-
-    .predictions-section {{
-      background: rgba(250, 250, 250, 0.02);
-      margin-top: 0.55rem;
-    }}
-
-    .predictions-match > summary,
-    .predictions-section > summary {{
-      cursor: pointer;
-      font-weight: 700;
-      list-style: none;
-      padding: 0.5rem 0.65rem;
-    }}
-
-    .predictions-match > summary::-webkit-details-marker,
-    .predictions-section > summary::-webkit-details-marker {{
-      display: none;
-    }}
-
-    .predictions-match > summary::before,
-    .predictions-section > summary::before {{
-      content: "[+] ";
-    }}
-
-    .predictions-match[open] > summary::before,
-    .predictions-section[open] > summary::before {{
-      content: "[-] ";
-    }}
-
-    .predictions-body {{
-      padding: 0 0.65rem 0.65rem;
-    }}
-
-    .predictions-grid {{
-      display: grid;
-      gap: 0.55rem;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    }}
-
-    .predictions-table-wrap {{
-      max-height: none;
-      overflow-x: auto;
-      overflow-y: visible;
-    }}
-
-    .predictions-table {{
-      border-collapse: collapse;
-      font-size: 0.8rem;
-      min-width: 800px;
-      width: 100%;
-    }}
-
-    .predictions-table th,
-    .predictions-table td {{
-      border: 1px solid rgba(250, 250, 250, 0.12);
-      overflow-wrap: anywhere;
-      padding: 0.34rem 0.42rem;
-      text-align: center;
-      vertical-align: middle;
-      white-space: normal;
-    }}
-
-    .predictions-table td.predictions-cell-reason {{
-      text-align: left;
-      white-space: pre-line;
-    }}
-
-    .predictions-table th {{
-      background: rgba(250, 250, 250, 0.04);
-      color: rgba(250, 250, 250, 0.72);
-      font-weight: 500;
-      position: sticky;
-      top: 0;
-      white-space: nowrap;
-      z-index: 1;
-    }}
-
-    .predictions-sort-button {{
-      align-items: center;
-      background: transparent;
-      border: 0;
-      color: inherit;
-      cursor: pointer;
-      display: inline-flex;
-      font: inherit;
-      gap: 0.25rem;
-      justify-content: center;
-      padding: 0;
-      width: 100%;
-    }}
-
-    .predictions-sort-button:hover {{
-      color: rgb(250, 250, 250);
-    }}
-
-    .predictions-sort-indicator {{
-      display: inline-block;
-      min-width: 0.7rem;
-      opacity: 0.75;
-    }}
-
-    .predictions-empty {{
-      color: rgba(250, 250, 250, 0.62);
-      font-size: 0.85rem;
-      margin: 0.45rem 0 0;
-    }}
-
-    @media (max-width: 1100px) {{
-      .predictions-grid {{
-        grid-template-columns: 1fr;
-      }}
-    }}
+{CARBON_IFRAME_CSS}
   </style>
 </head>
 <body>
@@ -1389,10 +1270,10 @@ def render_best_bets_by_match(rows: pd.DataFrame, columns: list[str]) -> None:
         label = f"{best_bets_match_label(match_rows)} ({len(match_rows)})"
         body = prediction_table_html(match_rows, columns, "Sem mercados.", sortable=True)
         sections.append(prediction_details_html(label, body, True, "predictions-match"))
-    st.iframe(
-        predictions_component_src(f'<div class="predictions-feed">{"".join(sections)}</div>', auto_resize=True),
-        width="stretch",
+    components.html(
+        predictions_component_document(f'<div class="predictions-feed">{"".join(sections)}</div>', auto_resize=True),
         height=predictions_component_height(grouped, open_all=True),
+        scrolling=True,
     )
 
 
@@ -3176,10 +3057,10 @@ def render_predictions_tab(matches_df: pd.DataFrame, prediction_rows: pd.DataFra
         body = "".join([game_html, teams_html, players_html])
         match_sections.append(prediction_details_html(title, body, False, "predictions-match"))
 
-    st.iframe(
-        predictions_component_src(f'<div class="predictions-feed">{"".join(match_sections)}</div>', auto_resize=True),
-        width="stretch",
+    components.html(
+        predictions_component_document(f'<div class="predictions-feed">{"".join(match_sections)}</div>', auto_resize=True),
         height=predictions_component_height(prediction_rows, open_all=False),
+        scrolling=True,
     )
 
 
@@ -3988,76 +3869,185 @@ def load_prediction_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd
 
 
 tab_options = ["Barbadas do Dia", "Palpites", "Estatísticas dos Times", "Estatísticas jogadores"]
-
-st.markdown(
-    """
-    <style>
-    div[data-testid="stSegmentedControl"] {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        width: 100%;
-    }
-    div[data-testid="stSegmentedControl"] > div {
-        display: flex !important;
-        justify-content: center !important;
-        align-items: center !important;
-        margin: 0 auto;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+palpites_count, jogos_count, odds_snapshots_count, odds_stale_count = load_dashboard_counts()
 
 default_tab = tab_options[0]
-active_tab = st.segmented_control(
-    "Aba",
-    tab_options,
-    default=default_tab,
-    label_visibility="collapsed",
+active_tab = st.session_state.get("carbon_active_tab", default_tab)
+if active_tab not in tab_options:
+    active_tab = default_tab
+
+render_header(
+    active_tab=active_tab,
+    palpites=palpites_count,
+    jogos=jogos_count,
+    odds_snapshots=odds_snapshots_count,
+    odds_stale=odds_stale_count,
 )
+render_filterbar(active_tab)
+
+with st.container(key="carbon_nav_panel"):
+    selected_tab = st.segmented_control(
+        "Aba",
+        tab_options,
+        default=active_tab,
+        key="carbon_active_tab",
+        label_visibility="collapsed",
+    )
+active_tab = selected_tab or active_tab
+
+
+def render_carbon_columns(
+    active_rows: pd.DataFrame,
+    sidebar_counts: dict[str, int],
+    legend_items: list[tuple[str, str, str]],
+    detail_items: list[tuple[str, str, str]],
+    heading: str,
+    render_main: Callable[[], None],
+) -> None:
+    render_legend(legend_items)
+    left_col, main_col, right_col = st.columns([1.15, 4.35, 1.75], gap="large")
+    with left_col:
+        with st.container(key="carbon_left_panel"):
+            render_sidebar(active_tab, sidebar_counts, odds_stale_count)
+    with main_col:
+        with st.container(key="carbon_main_panel"):
+            render_main_heading(active_tab, heading)
+            render_main()
+    with right_col:
+        with st.container(key="carbon_right_panel"):
+            render_detail_panel(active_tab, detail_items)
 
 if active_tab == "Barbadas do Dia":
     matches, display_results, snapshots, team_stats, lineups, player_stats = load_prediction_data()
     prediction_rows = all_bet_rows(matches, display_results, snapshots, team_stats, lineups, player_stats)
     best_bets = best_bets_rows(prediction_rows)
-    render_day_expanders(
+    sidebar_counts = {
+        tab_options[0]: len(best_bets),
+        tab_options[1]: len(prediction_rows),
+        tab_options[2]: len(matches),
+        tab_options[3]: len(lineups),
+    }
+    today_count = len(rows_for_day(best_bets, TODAY_DATE, "_target_date"))
+    tomorrow_count = len(rows_for_day(best_bets, TOMORROW_DATE, "_target_date"))
+    type_counts = best_bets["Tipo"].astype(str).value_counts().to_dict() if not best_bets.empty else {}
+    legend_items = [
+        ("Hoje", f"{today_count} linhas", "best bets"),
+        ("Amanhã", f"{tomorrow_count} linhas", "best bets"),
+        ("Jogos", str(type_counts.get("Jogo", 0)), "grupo preservado"),
+        ("Times", str(type_counts.get("Time", 0)), "grupo preservado"),
+        ("Jogadores", str(type_counts.get("Jogador", 0)), "grupo preservado"),
+    ]
+    render_carbon_columns(
         best_bets,
-        lambda date_value, day_rows: render_best_bets_tab(day_rows, key_prefix=f"best_bets_{date_value}"),
-        "_target_date",
-        "Sem mercados.",
+        sidebar_counts,
+        legend_items,
+        best_bet_detail_items(best_bets, is_x_publish_unlocked(), odds_stale_count),
+        "Tabela completa de recomendações: Data, Liga, Casa, Fora, Tipo, Time, Jogador, Mercado, Pick, Linha, ODD, Score e Motivo.",
+        lambda: render_day_expanders(
+            best_bets,
+            lambda date_value, day_rows: render_best_bets_tab(day_rows, key_prefix=f"best_bets_{date_value}"),
+            "_target_date",
+            "Sem mercados.",
+        ),
     )
 
 elif active_tab == "Palpites":
     matches, display_results, snapshots, team_stats, lineups, player_stats = load_prediction_data()
     prediction_rows = all_bet_rows(matches, display_results, snapshots, team_stats, lineups, player_stats)
-    render_day_expanders(
-        matches,
-        lambda date_value, day_matches: render_predictions_tab(
-            day_matches,
-            rows_for_day(prediction_rows, date_value, "_target_date"),
+    sidebar_counts = {
+        tab_options[0]: len(best_bets_rows(prediction_rows)),
+        tab_options[1]: len(prediction_rows),
+        tab_options[2]: len(matches),
+        tab_options[3]: len(lineups),
+    }
+    type_counts = prediction_rows["Tipo"].astype(str).value_counts().to_dict() if not prediction_rows.empty else {}
+    legend_items = [
+        ("Partidas", str(len(matches)), "Hoje + Amanhã"),
+        ("Jogo", str(type_counts.get("Jogo", 0)), "mercados gerais"),
+        ("Times", str(type_counts.get("Time", 0)), "mandante/visitante"),
+        ("Jogadores", str(type_counts.get("Jogador", 0)), "props e placeholders"),
+        ("Motivos", "100%", "preservados"),
+    ]
+    render_carbon_columns(
+        prediction_rows,
+        sidebar_counts,
+        legend_items,
+        generic_detail_items(prediction_rows, "Palpites", odds_stale_count),
+        "Todos os mercados por partida continuam agrupados em jogo, times e jogadores, com ODD, Score e Motivo ordenáveis.",
+        lambda: render_day_expanders(
+            matches,
+            lambda date_value, day_matches: render_predictions_tab(
+                day_matches,
+                rows_for_day(prediction_rows, date_value, "_target_date"),
+            ),
+            "target_date",
+            "Sem jogos para a data.",
         ),
-        "target_date",
-        "Sem jogos para a data.",
     )
 
 elif active_tab == "Estatísticas dos Times":
     matches = load_matches()
     team_stats = load_team_stats()
-    render_day_expanders(
-        matches,
-        lambda _date, day_matches: render_team_statistics_tab(day_matches, team_stats),
-        "target_date",
-        "Sem jogos para a data.",
+    sidebar_counts = {
+        tab_options[0]: palpites_count,
+        tab_options[1]: palpites_count,
+        tab_options[2]: len(matches),
+        tab_options[3]: 0,
+    }
+    target_teams = pd.concat(
+        [matches.get("home_team", pd.Series(dtype=str)), matches.get("away_team", pd.Series(dtype=str))],
+        ignore_index=True,
+    ).dropna()
+    legend_items = [
+        ("Partidas", str(len(matches)), "Hoje + Amanhã"),
+        ("Times", str(target_teams.nunique()), "mandante/visitante"),
+        ("Histórico", str(STATS_DISPLAY_GAMES), "jogos por lado"),
+        ("Métricas", str(len(TEAM_STAT_CATEGORIES)), "gols, xG, faltas"),
+        ("Fonte", "ESPN", "prioridade atual"),
+    ]
+    render_carbon_columns(
+        team_stats,
+        sidebar_counts,
+        legend_items,
+        generic_detail_items(team_stats, "Linhas ESPN", odds_stale_count),
+        "Histórico mandante/visitante com Jogo 1 a Jogo 10, Média, Resultado, Competição, Adversário e todas as métricas atuais.",
+        lambda: render_day_expanders(
+            matches,
+            lambda _date, day_matches: render_team_statistics_tab(day_matches, team_stats),
+            "target_date",
+            "Sem jogos para a data.",
+        ),
     )
 
 elif active_tab == "Estatísticas jogadores":
     matches = load_matches()
     lineups = load_lineups()
     player_stats = load_player_stats()
-    render_day_expanders(
-        matches,
-        lambda _date, day_matches: render_player_statistics_tab(day_matches, lineups, player_stats),
-        "target_date",
-        "Sem jogos para a data.",
+    sidebar_counts = {
+        tab_options[0]: palpites_count,
+        tab_options[1]: palpites_count,
+        tab_options[2]: len(matches),
+        tab_options[3]: len(lineups),
+    }
+    starters = int(lineups["starter"].astype(bool).sum()) if not lineups.empty and "starter" in lineups.columns else 0
+    bench = max(0, len(lineups) - starters)
+    legend_items = [
+        ("Jogadores", str(len(lineups)), "lineups"),
+        ("Stats", str(len(player_stats)), "linhas jogador"),
+        ("Titulares", str(starters), "estado filtrável"),
+        ("Reservas", str(bench), "estado filtrável"),
+        ("Mercados", str(len(PLAYER_STAT_CATEGORIES)), "histórico"),
+    ]
+    render_carbon_columns(
+        player_stats,
+        sidebar_counts,
+        legend_items,
+        generic_detail_items(player_stats, "Stats jogador", odds_stale_count),
+        "Lineup, titulares, reservas, camisa, posição, mercados, histórico individual, jogos e Média no mesmo fluxo denso.",
+        lambda: render_day_expanders(
+            matches,
+            lambda _date, day_matches: render_player_statistics_tab(day_matches, lineups, player_stats),
+            "target_date",
+            "Sem jogos para a data.",
+        ),
     )
