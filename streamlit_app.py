@@ -398,7 +398,7 @@ st.markdown(
 
     .predictions-table {
       width: 100%;
-      min-width: 1080px;
+      min-width: 800px;
       border-collapse: collapse;
       font-size: 0.8rem;
     }
@@ -704,7 +704,9 @@ GAME_COLUMNS = ["Data", "Liga", "Casa", "Fora", "Time", "Mercado", "Pick", "Linh
 GAME_MARKET_COLUMNS = ["Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
 TEAM_COLUMNS = ["Time", "Mercado", "Pick", "Linha", "Odd", "Score", "Motivo"]
 TEAM_PREDICTION_COLUMNS = ["Time", "Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
+TEAM_MARKET_COLUMNS = ["Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
 PLAYER_COLUMNS = ["Jogador", "Time", "Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
+PLAYER_MARKET_COLUMNS = ["Jogador", "Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"]
 BEST_BETS_COLUMNS = [
     "Data",
     "Liga",
@@ -1178,13 +1180,14 @@ def predictions_component_document(body: str, auto_resize: bool = False) -> str:
 
     .predictions-table-wrap {{
       max-height: none;
-      overflow: visible;
+      overflow-x: auto;
+      overflow-y: visible;
     }}
 
     .predictions-table {{
       border-collapse: collapse;
       font-size: 0.8rem;
-      min-width: 1080px;
+      min-width: 800px;
       width: 100%;
     }}
 
@@ -3131,6 +3134,9 @@ def render_predictions_tab(matches_df: pd.DataFrame, prediction_rows: pd.DataFra
         return
 
     match_sections = []
+    prediction_rows = prediction_rows.copy()
+    prediction_rows["_match_group_key"] = prediction_rows.apply(best_bets_match_key, axis=1)
+
     for _, match in matches_df.iterrows():
         title = f"{format_match_date(match)} | {match.get('home_team')} x {match.get('away_team')}"
         match_rows = prediction_rows_for_match(prediction_rows, match)
@@ -3146,24 +3152,24 @@ def render_predictions_tab(matches_df: pd.DataFrame, prediction_rows: pd.DataFra
         teams_html = prediction_grid_html(
             prediction_details_html(
                 f"Mercados time {match.get('home_team')}",
-                prediction_table_html(home_team_markets, TEAM_PREDICTION_COLUMNS, "Sem odds reais do time.", sortable=True),
+                prediction_table_html(home_team_markets, TEAM_MARKET_COLUMNS, "Sem odds reais do time.", sortable=True),
                 True,
             ),
             prediction_details_html(
                 f"Mercados time {match.get('away_team')}",
-                prediction_table_html(away_team_markets, TEAM_PREDICTION_COLUMNS, "Sem odds reais do time.", sortable=True),
+                prediction_table_html(away_team_markets, TEAM_MARKET_COLUMNS, "Sem odds reais do time.", sortable=True),
                 True,
             ),
         )
         players_html = prediction_grid_html(
             prediction_details_html(
                 f"Mercado jogadores {match.get('home_team')}",
-                prediction_table_html(home_players, PLAYER_COLUMNS, "Sem odds reais de jogadores.", sortable=True),
+                prediction_table_html(home_players, PLAYER_MARKET_COLUMNS, "Sem odds reais de jogadores.", sortable=True),
                 True,
             ),
             prediction_details_html(
                 f"Mercado jogadores {match.get('away_team')}",
-                prediction_table_html(away_players, PLAYER_COLUMNS, "Sem odds reais de jogadores.", sortable=True),
+                prediction_table_html(away_players, PLAYER_MARKET_COLUMNS, "Sem odds reais de jogadores.", sortable=True),
                 True,
             ),
         )
@@ -3171,9 +3177,9 @@ def render_predictions_tab(matches_df: pd.DataFrame, prediction_rows: pd.DataFra
         match_sections.append(prediction_details_html(title, body, False, "predictions-match"))
 
     st.iframe(
-        predictions_component_document(f'<div class="predictions-feed">{"".join(match_sections)}</div>', auto_resize=True),
+        predictions_component_src(f'<div class="predictions-feed">{"".join(match_sections)}</div>', auto_resize=True),
         width="stretch",
-        height="content",
+        height=predictions_component_height(prediction_rows, open_all=False),
     )
 
 
