@@ -35,14 +35,11 @@ import streamlit.components.v1 as components
 
 from src.dashboard.carbon_ui import (
     CARBON_IFRAME_CSS,
-    best_bet_detail_items,
     render_carbon_theme_css,
-    render_detail_panel,
     render_filterbar,
     render_header,
     render_legend,
     render_main_heading,
-    render_sidebar,
 )
 from config import ROOT_DIR, ensure_runtime_dirs, settings
 from src.dashboard.data import read_sql_frame
@@ -4233,27 +4230,14 @@ active_tab = selected_tab or active_tab
 
 
 def render_carbon_columns(
-    active_rows: pd.DataFrame,
-    sidebar_counts: dict[str, int],
     legend_items: list[tuple[str, str, str]],
-    detail_items: list[tuple[str, str, str]],
     heading: str,
     render_main: Callable[[], None],
-    sidebar_state_items: list[tuple[str, str]],
-    detail_description: str,
 ) -> None:
     render_legend(legend_items)
-    left_col, main_col, right_col = st.columns([1.15, 4.35, 1.75], gap="large")
-    with left_col:
-        with st.container(key="carbon_left_panel"):
-            render_sidebar(active_tab, sidebar_counts, odds_stale_count, sidebar_state_items)
-    with main_col:
-        with st.container(key="carbon_main_panel"):
-            render_main_heading(active_tab, heading)
-            render_main()
-    with right_col:
-        with st.container(key="carbon_right_panel"):
-            render_detail_panel(active_tab, detail_items, detail_description)
+    with st.container(key="carbon_main_panel"):
+        render_main_heading(active_tab, heading)
+        render_main()
 
 if active_tab == "Barbadas do Dia":
     matches, display_results, snapshots, team_stats, lineups, player_stats = load_prediction_data()
@@ -4263,12 +4247,6 @@ if active_tab == "Barbadas do Dia":
     best_bets = apply_prediction_filters(best_bets_all, filters)
     status_items = prediction_filter_status(filters, len(best_bets), len(best_bets_all))
     render_filterbar(active_tab, status_items[:4])
-    sidebar_counts = {
-        tab_options[0]: len(best_bets),
-        tab_options[1]: len(prediction_rows),
-        tab_options[2]: len(matches),
-        tab_options[3]: len(lineups),
-    }
     today_count = len(rows_for_day(best_bets, TODAY_DATE, "_target_date"))
     tomorrow_count = len(rows_for_day(best_bets, TOMORROW_DATE, "_target_date"))
     type_counts = best_bets["Tipo"].astype(str).value_counts().to_dict() if not best_bets.empty else {}
@@ -4280,10 +4258,7 @@ if active_tab == "Barbadas do Dia":
         ("Jogadores", str(type_counts.get("Jogador", 0)), "grupo preservado"),
     ]
     render_carbon_columns(
-        best_bets,
-        sidebar_counts,
         legend_items,
-        best_bet_detail_items(best_bets, is_x_publish_unlocked(), odds_stale_count),
         "Tabela completa de recomendações: Data, Liga, Casa, Fora, Tipo, Time, Jogador, Mercado, Pick, Linha, ODD, Score e Motivo.",
         lambda: render_day_expanders(
             best_bets,
@@ -4292,8 +4267,6 @@ if active_tab == "Barbadas do Dia":
             "Sem mercados.",
             days_for_filter(str(filters["day"])),
         ),
-        status_items,
-        "Indicadores calculados sobre as barbadas filtradas, com publicação X ligada ao mesmo conjunto exibido.",
     )
 
 elif active_tab == "Palpites":
@@ -4306,12 +4279,6 @@ elif active_tab == "Palpites":
     filtered_matches = filter_matches_by_prediction_rows(filtered_matches, prediction_rows)
     status_items = prediction_filter_status(filters, len(prediction_rows), len(prediction_rows_all))
     render_filterbar(active_tab, status_items[:4])
-    sidebar_counts = {
-        tab_options[0]: len(best_bets_rows(prediction_rows_all)),
-        tab_options[1]: len(prediction_rows),
-        tab_options[2]: len(filtered_matches),
-        tab_options[3]: len(lineups),
-    }
     type_counts = prediction_rows["Tipo"].astype(str).value_counts().to_dict() if not prediction_rows.empty else {}
     legend_items = [
         ("Partidas", str(len(filtered_matches)), str(filters["day"])),
@@ -4320,18 +4287,8 @@ elif active_tab == "Palpites":
         ("Jogadores", str(type_counts.get("Jogador", 0)), "props e histórico"),
         ("Motivos", "100%", "preservados"),
     ]
-    detail_items = [
-        ("Linhas", str(len(prediction_rows)), "good" if len(prediction_rows) else "warn"),
-        ("Partidas", str(len(filtered_matches)), "good" if len(filtered_matches) else "warn"),
-        ("Jogo/Time/Jogador", f"{type_counts.get('Jogo', 0)}/{type_counts.get('Time', 0)}/{type_counts.get('Jogador', 0)}", "good"),
-        ("Score mínimo", str(filters["score_min"]), "good" if int(filters["score_min"]) == 0 else "warn"),
-        ("Odd mínima", f"{float(filters['odd_min']):.2f}", "good" if float(filters["odd_min"]) == 0 else "warn"),
-    ]
     render_carbon_columns(
-        prediction_rows,
-        sidebar_counts,
         legend_items,
-        detail_items,
         "Todos os mercados por partida continuam agrupados em jogo, times e jogadores, com ODD, Score e Motivo ordenáveis.",
         lambda: render_day_expanders(
             filtered_matches,
@@ -4343,8 +4300,6 @@ elif active_tab == "Palpites":
             "Sem jogos para a data.",
             days_for_filter(str(filters["day"])),
         ),
-        status_items,
-        "Resumo do book filtrado. Partidas sem mercado correspondente ao recorte saem da lista para reduzir ruído.",
     )
 
 elif active_tab == "Estatísticas dos Times":
@@ -4354,12 +4309,6 @@ elif active_tab == "Estatísticas dos Times":
     filtered_matches, filtered_team_stats = apply_team_filters(matches, team_stats, filters)
     status_items = generic_filter_status(filters, len(filtered_team_stats), len(team_stats))
     render_filterbar(active_tab, status_items[:4])
-    sidebar_counts = {
-        tab_options[0]: palpites_count,
-        tab_options[1]: palpites_count,
-        tab_options[2]: len(filtered_matches),
-        tab_options[3]: 0,
-    }
     target_teams = pd.concat(
         [filtered_matches.get("home_team", pd.Series(dtype=str)), filtered_matches.get("away_team", pd.Series(dtype=str))],
         ignore_index=True,
@@ -4371,18 +4320,8 @@ elif active_tab == "Estatísticas dos Times":
         ("Métricas", str(len(TEAM_STAT_CATEGORIES)), "gols, xG, faltas"),
         ("Fonte", str(filters["source"]), "histórico filtrável"),
     ]
-    detail_items = [
-        ("Partidas", str(len(filtered_matches)), "good" if len(filtered_matches) else "warn"),
-        ("Times exibidos", str(target_teams.nunique()), "good" if target_teams.nunique() else "warn"),
-        ("Linhas ESPN", str(len(filtered_team_stats)), "good" if len(filtered_team_stats) else "warn"),
-        ("Histórico", str(filters["side"]), "good"),
-        ("Busca", str(filters["query"]) or "inativa", "good" if not str(filters["query"]) else "warn"),
-    ]
     render_carbon_columns(
-        filtered_team_stats,
-        sidebar_counts,
         legend_items,
-        detail_items,
         "Histórico mandante/visitante com Jogo 1 a Jogo 10, Média, Resultado, Competição, Adversário e todas as métricas atuais.",
         lambda: render_day_expanders(
             filtered_matches,
@@ -4391,8 +4330,6 @@ elif active_tab == "Estatísticas dos Times":
             "Sem jogos para a data.",
             days_for_filter(str(filters["day"])),
         ),
-        status_items,
-        "Diagnóstico das estatísticas de times após recorte de data, time, fonte, lado mandante/visitante e busca.",
     )
 
 elif active_tab == "Estatísticas jogadores":
@@ -4403,12 +4340,7 @@ elif active_tab == "Estatísticas jogadores":
     filtered_matches, filtered_lineups, filtered_player_stats = apply_player_filters(matches, lineups, player_stats, filters)
     status_items = generic_filter_status(filters, len(filtered_lineups), len(lineups))
     render_filterbar(active_tab, status_items[:4])
-    sidebar_counts = {
-        tab_options[0]: palpites_count,
-        tab_options[1]: palpites_count,
-        tab_options[2]: len(filtered_matches),
-        tab_options[3]: len(filtered_lineups),
-    }
+    from src.db.models import bool_from_db
     starters = int(filtered_lineups["starter"].apply(bool_from_db).sum()) if not filtered_lineups.empty and "starter" in filtered_lineups.columns else 0
     bench = max(0, len(filtered_lineups) - starters)
     legend_items = [
@@ -4418,18 +4350,8 @@ elif active_tab == "Estatísticas jogadores":
         ("Reservas", str(bench), "estado filtrável"),
         ("Mercados", str(len(PLAYER_STAT_CATEGORIES)), "histórico"),
     ]
-    detail_items = [
-        ("Partidas", str(len(filtered_matches)), "good" if len(filtered_matches) else "warn"),
-        ("Lineups", str(len(filtered_lineups)), "good" if len(filtered_lineups) else "warn"),
-        ("Stats jogador", str(len(filtered_player_stats)), "good" if len(filtered_player_stats) else "warn"),
-        ("Lineup", str(filters["status"]), "good"),
-        ("Busca", str(filters["query"]) or "inativa", "good" if not str(filters["query"]) else "warn"),
-    ]
     render_carbon_columns(
-        filtered_player_stats,
-        sidebar_counts,
         legend_items,
-        detail_items,
         "Lineup, titulares, reservas, camisa, posição, mercados, histórico individual, jogos e Média no mesmo fluxo denso.",
         lambda: render_day_expanders(
             filtered_matches,
@@ -4438,6 +4360,4 @@ elif active_tab == "Estatísticas jogadores":
             "Sem jogos para a data.",
             days_for_filter(str(filters["day"])),
         ),
-        status_items,
-        "Diagnóstico de jogadores após recorte por data, time, status de lineup, posição, fonte e busca.",
     )
