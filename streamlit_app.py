@@ -36,7 +36,6 @@ import streamlit.components.v1 as components
 from src.dashboard.carbon_ui import (
     CARBON_IFRAME_CSS,
     best_bet_detail_items,
-    generic_detail_items,
     render_carbon_theme_css,
     render_detail_panel,
     render_filterbar,
@@ -3798,10 +3797,11 @@ def render_day_expanders(
     render_day,
     column: str = "target_date",
     empty_text: str = "Sem dados.",
+    days: tuple[tuple[str, str], ...] = DASHBOARD_DAYS,
 ) -> None:
     day_groups = [
         (date_value, label, rows_for_day(title_count_rows, date_value, column))
-        for date_value, label in DASHBOARD_DAYS
+        for date_value, label in days
     ]
     first_open_index = next((index for index, (_, _, day_rows) in enumerate(day_groups) if not day_rows.empty), 0)
     for index, (date_value, label, day_rows) in enumerate(day_groups):
@@ -3868,6 +3868,343 @@ def load_prediction_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd
     return matches, display_results, snapshots, team_stats, lineups, player_stats
 
 
+DATE_FILTER_ALL = "Hoje + Amanhã"
+DATE_FILTER_OPTIONS = [DATE_FILTER_ALL, "Hoje", "Amanhã"]
+DATE_FILTER_VALUES = {DATE_FILTER_ALL: "", "Hoje": TODAY_DATE, "Amanhã": TOMORROW_DATE}
+
+
+def days_for_filter(day_label: str) -> tuple[tuple[str, str], ...]:
+    date_value = DATE_FILTER_VALUES.get(day_label, "")
+    if not date_value:
+        return DASHBOARD_DAYS
+    label = next((label for value, label in DASHBOARD_DAYS if value == date_value), day_label)
+    return ((date_value, label),)
+
+
+def carbon_key(active_tab: str, name: str) -> str:
+    return safe_key("carbon", active_tab, name)
+
+
+def unique_string_values(rows: pd.DataFrame, *columns: str, limit: int = 140) -> list[str]:
+    values: dict[str, str] = {}
+    for column in columns:
+        if rows.empty or column not in rows.columns:
+            continue
+        for value in rows[column].dropna().astype(str):
+            text = value.strip()
+            if not text or plain_text(text) in {"n d", "nan", "none"}:
+                continue
+            values.setdefault(plain_text(text), text)
+    return [values[key] for key in sorted(values)[:limit]]
+
+
+def filter_rows_by_day(rows: pd.DataFrame, day_label: str, column: str) -> pd.DataFrame:
+    if rows.empty or column not in rows.columns:
+        return rows.copy()
+    date_value = DATE_FILTER_VALUES.get(day_label, "")
+    if not date_value:
+        return rows.copy()
+    return rows[rows[column].astype(str).eq(date_value)].copy()
+
+
+def filter_matches_by_team(matches: pd.DataFrame, team_name: str) -> pd.DataFrame:
+    if matches.empty or team_name == "Todos":
+        return matches.copy()
+    return matches[
+        matches["home_team"].apply(lambda value: teams_match(value, team_name))
+        | matches["away_team"].apply(lambda value: teams_match(value, team_name))
+    ].copy()
+
+
+def filter_matches_by_prediction_rows(matches: pd.DataFrame, prediction_rows: pd.DataFrame) -> pd.DataFrame:
+    if matches.empty:
+        return matches.copy()
+    if prediction_rows.empty:
+        return matches.iloc[0:0].copy()
+    if "_source_match_id" in prediction_rows.columns and "source_match_id" in matches.columns:
+        match_ids = set(prediction_rows["_source_match_id"].dropna().astype(str))
+        if match_ids:
+            return matches[matches["source_match_id"].astype(str).isin(match_ids)].copy()
+    return matches.copy()
+
+
+def filter_text_contains(rows: pd.DataFrame, query: str, columns: list[str]) -> pd.DataFrame:
+    search = plain_text(query).strip()
+    if rows.empty or not search:
+        return rows.copy()
+    available_columns = [column for column in columns if column in rows.columns]
+    if not available_columns:
+        return rows.copy()
+    mask = rows[available_columns].fillna("").astype(str).agg(" ".join, axis=1).apply(lambda value: search in plain_text(value))
+    return rows[mask].copy()
+
+
+def filter_team_columns(rows: pd.DataFrame, team_name: str, columns: list[str]) -> pd.DataFrame:
+    if rows.empty or team_name == "Todos":
+        return rows.copy()
+    available_columns = [column for column in columns if column in rows.columns]
+    if not available_columns:
+        return rows.copy()
+    mask = pd.Series(False, index=rows.index)
+    for column in available_columns:
+        mask = mask | rows[column].apply(lambda value: teams_match(value, team_name))
+    return rows[mask].copy()
+
+
+def filter_numeric_min(rows: pd.DataFrame, min_value: float, *columns: str) -> pd.DataFrame:
+    if rows.empty or min_value <= 0:
+        return rows.copy()
+    values = numeric_filter_values(rows, *columns)
+    return rows[values >= min_value].copy()
+
+
+def prediction_team_options(matches: pd.DataFrame, rows: pd.DataFrame) -> list[str]:
+    values: dict[str, str] = {}
+    for source_rows, columns in (
+        (matches, ("home_team", "away_team")),
+        (rows, ("Casa", "Fora", "Time")),
+    ):
+        for value in unique_string_values(source_rows, *columns):
+            values.setdefault(plain_text(value), value)
+    return ["Todos", *[values[key] for key in sorted(values)]]
+
+
+def render_prediction_filter_controls(
+    active_tab: str,
+    rows: pd.DataFrame,
+    matches: pd.DataFrame,
+    *,
+    score_default: int,
+    odd_default: float,
+) -> dict[str, object]:
+    type_options = ["Todos", *unique_string_values(rows, "Tipo")]
+    if len(type_options) == 1:
+        type_options.extend(["Jogo", "Time", "Jogador"])
+    market_options = ["Todos", *unique_string_values(rows, "Mercado")]
+    team_options = prediction_team_options(matches, rows)
+
+    with st.container(key="carbon_filter_panel"):
+        st.markdown(
+            '<div class="carbon-panel-kicker">Filtros operacionais</div>'
+            '<div class="carbon-panel-copy">Todos os filtros abaixo atuam sobre os mesmos DataFrames usados pelas tabelas atuais.</div>',
+            unsafe_allow_html=True,
+        )
+        first_row = st.columns([1.0, 1.0, 1.2, 1.2], gap="small")
+        with first_row[0]:
+            day = st.selectbox("Data", DATE_FILTER_OPTIONS, key=carbon_key(active_tab, "day"))
+        with first_row[1]:
+            bet_type = st.selectbox("Tipo", type_options, key=carbon_key(active_tab, "type"))
+        with first_row[2]:
+            team = st.selectbox("Time", team_options, key=carbon_key(active_tab, "team"))
+        with first_row[3]:
+            market = st.selectbox("Mercado", market_options, key=carbon_key(active_tab, "market"))
+
+        second_row = st.columns([0.9, 0.9, 2.2], gap="small")
+        with second_row[0]:
+            score_min = st.slider("Score mínimo", 0, 100, score_default, 1, key=carbon_key(active_tab, "score"))
+        with second_row[1]:
+            odd_min = st.number_input(
+                "Odd mínima",
+                min_value=0.0,
+                max_value=1000.0,
+                value=odd_default,
+                step=0.05,
+                format="%.2f",
+                key=carbon_key(active_tab, "odd"),
+            )
+        with second_row[2]:
+            query = st.text_input(
+                "Busca livre",
+                placeholder="Time, jogador, mercado, pick, motivo ou liga",
+                key=carbon_key(active_tab, "query"),
+            )
+    return {
+        "day": str(day),
+        "type": str(bet_type),
+        "team": str(team),
+        "market": str(market),
+        "score_min": int(score_min),
+        "odd_min": float(odd_min),
+        "query": str(query or "").strip(),
+    }
+
+
+def apply_prediction_filters(rows: pd.DataFrame, filters: dict[str, object]) -> pd.DataFrame:
+    filtered = filter_rows_by_day(rows, str(filters["day"]), "_target_date")
+    bet_type = str(filters["type"])
+    if bet_type != "Todos" and "Tipo" in filtered.columns:
+        filtered = filtered[filtered["Tipo"].astype(str).eq(bet_type)].copy()
+    market = str(filters["market"])
+    if market != "Todos" and "Mercado" in filtered.columns:
+        filtered = filtered[filtered["Mercado"].astype(str).eq(market)].copy()
+    filtered = filter_team_columns(filtered, str(filters["team"]), ["Casa", "Fora", "Time"])
+    filtered = filter_numeric_min(filtered, float(filters["score_min"]), "Score")
+    filtered = filter_numeric_min(filtered, float(filters["odd_min"]), "ODD", "Odd")
+    return filter_text_contains(
+        filtered,
+        str(filters["query"]),
+        ["Data", "Liga", "Casa", "Fora", "Tipo", "Time", "Jogador", "Mercado", "Pick", "Linha", "ODD", "Score", "Motivo"],
+    ).reset_index(drop=True)
+
+
+def prediction_filter_status(filters: dict[str, object], shown: int, total: int) -> list[tuple[str, str]]:
+    team = str(filters["team"])
+    market = str(filters["market"])
+    query = str(filters["query"]) or "sem busca"
+    scope = []
+    if str(filters["type"]) != "Todos":
+        scope.append(str(filters["type"]))
+    if team != "Todos":
+        scope.append(team)
+    if market != "Todos":
+        scope.append(market)
+    return [
+        ("Data", str(filters["day"])),
+        ("Linhas", f"{shown:,}".replace(",", ".") + f" de {total:,}".replace(",", ".")),
+        ("Recorte", " | ".join(scope) if scope else "todos os tipos e mercados"),
+        ("Score/Odd", f">= {filters['score_min']} / >= {float(filters['odd_min']):.2f}"),
+        ("Busca", query),
+    ]
+
+
+def render_team_filter_controls(active_tab: str, matches: pd.DataFrame, team_stats: pd.DataFrame) -> dict[str, object]:
+    team_options = ["Todos", *unique_string_values(matches, "home_team", "away_team")]
+    source_options = ["Todas", *unique_string_values(team_stats, "source")]
+    with st.container(key="carbon_filter_panel"):
+        st.markdown(
+            '<div class="carbon-panel-kicker">Filtros operacionais</div>'
+            '<div class="carbon-panel-copy">O recorte altera partidas exibidas e o histórico usado nas tabelas ESPN.</div>',
+            unsafe_allow_html=True,
+        )
+        columns = st.columns([1.0, 1.3, 1.0, 1.0, 1.8], gap="small")
+        with columns[0]:
+            day = st.selectbox("Data", DATE_FILTER_OPTIONS, key=carbon_key(active_tab, "day"))
+        with columns[1]:
+            team = st.selectbox("Time", team_options, key=carbon_key(active_tab, "team"))
+        with columns[2]:
+            source = st.selectbox("Fonte", source_options, key=carbon_key(active_tab, "source"))
+        with columns[3]:
+            side = st.selectbox("Histórico", ["Mandante + visitante", "Mandante", "Visitante"], key=carbon_key(active_tab, "side"))
+        with columns[4]:
+            query = st.text_input("Busca", placeholder="Time, liga ou adversário", key=carbon_key(active_tab, "query"))
+    return {"day": str(day), "team": str(team), "source": str(source), "side": str(side), "query": str(query or "").strip()}
+
+
+def apply_team_filters(
+    matches: pd.DataFrame,
+    team_stats: pd.DataFrame,
+    filters: dict[str, object],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    filtered_matches = filter_rows_by_day(matches, str(filters["day"]), "target_date")
+    filtered_matches = filter_matches_by_team(filtered_matches, str(filters["team"]))
+    filtered_matches = filter_text_contains(filtered_matches, str(filters["query"]), ["league_name", "home_team", "away_team"])
+
+    filtered_stats = team_stats.copy()
+    if str(filters["team"]) != "Todos" and "team_name" in filtered_stats.columns:
+        filtered_stats = filtered_stats[filtered_stats["team_name"].apply(lambda value: teams_match(value, str(filters["team"])))].copy()
+    if str(filters["source"]) != "Todas" and "source" in filtered_stats.columns:
+        filtered_stats = filtered_stats[filtered_stats["source"].astype(str).eq(str(filters["source"]))].copy()
+    if "is_home" in filtered_stats.columns:
+        if str(filters["side"]) == "Mandante":
+            filtered_stats = filtered_stats[filtered_stats["is_home"].astype(bool)].copy()
+        elif str(filters["side"]) == "Visitante":
+            filtered_stats = filtered_stats[~filtered_stats["is_home"].astype(bool)].copy()
+    return filtered_matches.reset_index(drop=True), filtered_stats.reset_index(drop=True)
+
+
+def render_player_filter_controls(
+    active_tab: str,
+    matches: pd.DataFrame,
+    lineups: pd.DataFrame,
+    player_stats: pd.DataFrame,
+) -> dict[str, object]:
+    team_options = ["Todos", *unique_string_values(matches, "home_team", "away_team", limit=120)]
+    source_options = ["Todas", *unique_string_values(player_stats, "source")]
+    position_options = ["Todas", *unique_string_values(lineups, "position")]
+    with st.container(key="carbon_filter_panel"):
+        st.markdown(
+            '<div class="carbon-panel-kicker">Filtros operacionais</div>'
+            '<div class="carbon-panel-copy">O painel filtra partidas, lineups e histórico individual sem alterar a coleta nem o scoring.</div>',
+            unsafe_allow_html=True,
+        )
+        first_row = st.columns([1.0, 1.25, 1.0, 1.0], gap="small")
+        with first_row[0]:
+            day = st.selectbox("Data", DATE_FILTER_OPTIONS, key=carbon_key(active_tab, "day"))
+        with first_row[1]:
+            team = st.selectbox("Time", team_options, key=carbon_key(active_tab, "team"))
+        with first_row[2]:
+            status = st.selectbox("Lineup", ["Todos", "Titulares", "Reservas"], key=carbon_key(active_tab, "status"))
+        with first_row[3]:
+            position = st.selectbox("Posição", position_options, key=carbon_key(active_tab, "position"))
+        second_row = st.columns([1.0, 2.6], gap="small")
+        with second_row[0]:
+            source = st.selectbox("Fonte", source_options, key=carbon_key(active_tab, "source"))
+        with second_row[1]:
+            query = st.text_input("Busca", placeholder="Jogador, time ou posição", key=carbon_key(active_tab, "query"))
+    return {
+        "day": str(day),
+        "team": str(team),
+        "status": str(status),
+        "position": str(position),
+        "source": str(source),
+        "query": str(query or "").strip(),
+    }
+
+
+def filter_player_stats_teams(matches: pd.DataFrame, team_names: set[str]) -> pd.DataFrame:
+    if matches.empty or not team_names:
+        return matches.copy()
+    normalized = {plain_text(team) for team in team_names if plain_text(team)}
+    return matches[
+        matches["home_team"].apply(lambda value: plain_text(value) in normalized)
+        | matches["away_team"].apply(lambda value: plain_text(value) in normalized)
+    ].copy()
+
+
+def apply_player_filters(
+    matches: pd.DataFrame,
+    lineups: pd.DataFrame,
+    player_stats: pd.DataFrame,
+    filters: dict[str, object],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    filtered_matches = filter_rows_by_day(matches, str(filters["day"]), "target_date")
+    filtered_matches = filter_matches_by_team(filtered_matches, str(filters["team"]))
+
+    filtered_lineups = filter_team_columns(lineups, str(filters["team"]), ["team_name"])
+    filtered_stats = filter_team_columns(player_stats, str(filters["team"]), ["team_name"])
+
+    if str(filters["status"]) != "Todos" and "starter" in filtered_lineups.columns:
+        starter_value = str(filters["status"]) == "Titulares"
+        filtered_lineups = filtered_lineups[filtered_lineups["starter"].apply(bool_from_db).eq(starter_value)].copy()
+    if str(filters["position"]) != "Todas" and "position" in filtered_lineups.columns:
+        filtered_lineups = filtered_lineups[filtered_lineups["position"].astype(str).eq(str(filters["position"]))].copy()
+    if str(filters["source"]) != "Todas" and "source" in filtered_stats.columns:
+        filtered_stats = filtered_stats[filtered_stats["source"].astype(str).eq(str(filters["source"]))].copy()
+
+    filtered_lineups = filter_text_contains(filtered_lineups, str(filters["query"]), ["player_name", "team_name", "position", "jersey"])
+    filtered_stats = filter_text_contains(filtered_stats, str(filters["query"]), ["player_name", "team_name", "position", "league_name", "opponent_name"])
+    if str(filters["query"]).strip():
+        teams_with_players = set()
+        for frame in (filtered_lineups, filtered_stats):
+            if "team_name" in frame.columns:
+                teams_with_players.update(frame["team_name"].dropna().astype(str))
+        filtered_matches = filter_player_stats_teams(filtered_matches, teams_with_players)
+
+    return filtered_matches.reset_index(drop=True), filtered_lineups.reset_index(drop=True), filtered_stats.reset_index(drop=True)
+
+
+def generic_filter_status(filters: dict[str, object], shown: int, total: int) -> list[tuple[str, str]]:
+    visible = f"{shown:,}".replace(",", ".") + f" de {total:,}".replace(",", ".")
+    items = [("Data", str(filters.get("day", DATE_FILTER_ALL))), ("Registros", visible)]
+    for label, key in (("Time", "team"), ("Fonte", "source"), ("Estado", "status"), ("Posicao", "position")):
+        value = str(filters.get(key, ""))
+        if value and value not in {"Todos", "Todas"}:
+            items.append((label, value))
+    query = str(filters.get("query", "")).strip()
+    items.append(("Busca", query if query else "sem busca"))
+    return items
+
+
 tab_options = ["Barbadas do Dia", "Palpites", "Estatísticas dos Times", "Estatísticas jogadores"]
 palpites_count, jogos_count, odds_snapshots_count, odds_stale_count = load_dashboard_counts()
 
@@ -3883,7 +4220,6 @@ render_header(
     odds_snapshots=odds_snapshots_count,
     odds_stale=odds_stale_count,
 )
-render_filterbar(active_tab)
 
 with st.container(key="carbon_nav_panel"):
     selected_tab = st.segmented_control(
@@ -3903,24 +4239,30 @@ def render_carbon_columns(
     detail_items: list[tuple[str, str, str]],
     heading: str,
     render_main: Callable[[], None],
+    sidebar_state_items: list[tuple[str, str]],
+    detail_description: str,
 ) -> None:
     render_legend(legend_items)
     left_col, main_col, right_col = st.columns([1.15, 4.35, 1.75], gap="large")
     with left_col:
         with st.container(key="carbon_left_panel"):
-            render_sidebar(active_tab, sidebar_counts, odds_stale_count)
+            render_sidebar(active_tab, sidebar_counts, odds_stale_count, sidebar_state_items)
     with main_col:
         with st.container(key="carbon_main_panel"):
             render_main_heading(active_tab, heading)
             render_main()
     with right_col:
         with st.container(key="carbon_right_panel"):
-            render_detail_panel(active_tab, detail_items)
+            render_detail_panel(active_tab, detail_items, detail_description)
 
 if active_tab == "Barbadas do Dia":
     matches, display_results, snapshots, team_stats, lineups, player_stats = load_prediction_data()
     prediction_rows = all_bet_rows(matches, display_results, snapshots, team_stats, lineups, player_stats)
-    best_bets = best_bets_rows(prediction_rows)
+    best_bets_all = best_bets_rows(prediction_rows)
+    filters = render_prediction_filter_controls(active_tab, best_bets_all, matches, score_default=75, odd_default=1.30)
+    best_bets = apply_prediction_filters(best_bets_all, filters)
+    status_items = prediction_filter_status(filters, len(best_bets), len(best_bets_all))
+    render_filterbar(active_tab, status_items[:4])
     sidebar_counts = {
         tab_options[0]: len(best_bets),
         tab_options[1]: len(prediction_rows),
@@ -3948,106 +4290,154 @@ if active_tab == "Barbadas do Dia":
             lambda date_value, day_rows: render_best_bets_tab(day_rows, key_prefix=f"best_bets_{date_value}"),
             "_target_date",
             "Sem mercados.",
+            days_for_filter(str(filters["day"])),
         ),
+        status_items,
+        "Indicadores calculados sobre as barbadas filtradas, com publicação X ligada ao mesmo conjunto exibido.",
     )
 
 elif active_tab == "Palpites":
     matches, display_results, snapshots, team_stats, lineups, player_stats = load_prediction_data()
-    prediction_rows = all_bet_rows(matches, display_results, snapshots, team_stats, lineups, player_stats)
+    prediction_rows_all = all_bet_rows(matches, display_results, snapshots, team_stats, lineups, player_stats)
+    filters = render_prediction_filter_controls(active_tab, prediction_rows_all, matches, score_default=0, odd_default=0.0)
+    prediction_rows = apply_prediction_filters(prediction_rows_all, filters)
+    filtered_matches = filter_rows_by_day(matches, str(filters["day"]), "target_date")
+    filtered_matches = filter_matches_by_team(filtered_matches, str(filters["team"]))
+    filtered_matches = filter_matches_by_prediction_rows(filtered_matches, prediction_rows)
+    status_items = prediction_filter_status(filters, len(prediction_rows), len(prediction_rows_all))
+    render_filterbar(active_tab, status_items[:4])
     sidebar_counts = {
-        tab_options[0]: len(best_bets_rows(prediction_rows)),
+        tab_options[0]: len(best_bets_rows(prediction_rows_all)),
         tab_options[1]: len(prediction_rows),
-        tab_options[2]: len(matches),
+        tab_options[2]: len(filtered_matches),
         tab_options[3]: len(lineups),
     }
     type_counts = prediction_rows["Tipo"].astype(str).value_counts().to_dict() if not prediction_rows.empty else {}
     legend_items = [
-        ("Partidas", str(len(matches)), "Hoje + Amanhã"),
+        ("Partidas", str(len(filtered_matches)), str(filters["day"])),
         ("Jogo", str(type_counts.get("Jogo", 0)), "mercados gerais"),
         ("Times", str(type_counts.get("Time", 0)), "mandante/visitante"),
-        ("Jogadores", str(type_counts.get("Jogador", 0)), "props e placeholders"),
+        ("Jogadores", str(type_counts.get("Jogador", 0)), "props e histórico"),
         ("Motivos", "100%", "preservados"),
+    ]
+    detail_items = [
+        ("Linhas", str(len(prediction_rows)), "good" if len(prediction_rows) else "warn"),
+        ("Partidas", str(len(filtered_matches)), "good" if len(filtered_matches) else "warn"),
+        ("Jogo/Time/Jogador", f"{type_counts.get('Jogo', 0)}/{type_counts.get('Time', 0)}/{type_counts.get('Jogador', 0)}", "good"),
+        ("Score mínimo", str(filters["score_min"]), "good" if int(filters["score_min"]) == 0 else "warn"),
+        ("Odd mínima", f"{float(filters['odd_min']):.2f}", "good" if float(filters["odd_min"]) == 0 else "warn"),
     ]
     render_carbon_columns(
         prediction_rows,
         sidebar_counts,
         legend_items,
-        generic_detail_items(prediction_rows, "Palpites", odds_stale_count),
+        detail_items,
         "Todos os mercados por partida continuam agrupados em jogo, times e jogadores, com ODD, Score e Motivo ordenáveis.",
         lambda: render_day_expanders(
-            matches,
+            filtered_matches,
             lambda date_value, day_matches: render_predictions_tab(
                 day_matches,
                 rows_for_day(prediction_rows, date_value, "_target_date"),
             ),
             "target_date",
             "Sem jogos para a data.",
+            days_for_filter(str(filters["day"])),
         ),
+        status_items,
+        "Resumo do book filtrado. Partidas sem mercado correspondente ao recorte saem da lista para reduzir ruído.",
     )
 
 elif active_tab == "Estatísticas dos Times":
     matches = load_matches()
     team_stats = load_team_stats()
+    filters = render_team_filter_controls(active_tab, matches, team_stats)
+    filtered_matches, filtered_team_stats = apply_team_filters(matches, team_stats, filters)
+    status_items = generic_filter_status(filters, len(filtered_team_stats), len(team_stats))
+    render_filterbar(active_tab, status_items[:4])
     sidebar_counts = {
         tab_options[0]: palpites_count,
         tab_options[1]: palpites_count,
-        tab_options[2]: len(matches),
+        tab_options[2]: len(filtered_matches),
         tab_options[3]: 0,
     }
     target_teams = pd.concat(
-        [matches.get("home_team", pd.Series(dtype=str)), matches.get("away_team", pd.Series(dtype=str))],
+        [filtered_matches.get("home_team", pd.Series(dtype=str)), filtered_matches.get("away_team", pd.Series(dtype=str))],
         ignore_index=True,
     ).dropna()
     legend_items = [
-        ("Partidas", str(len(matches)), "Hoje + Amanhã"),
+        ("Partidas", str(len(filtered_matches)), str(filters["day"])),
         ("Times", str(target_teams.nunique()), "mandante/visitante"),
         ("Histórico", str(STATS_DISPLAY_GAMES), "jogos por lado"),
         ("Métricas", str(len(TEAM_STAT_CATEGORIES)), "gols, xG, faltas"),
-        ("Fonte", "ESPN", "prioridade atual"),
+        ("Fonte", str(filters["source"]), "histórico filtrável"),
+    ]
+    detail_items = [
+        ("Partidas", str(len(filtered_matches)), "good" if len(filtered_matches) else "warn"),
+        ("Times exibidos", str(target_teams.nunique()), "good" if target_teams.nunique() else "warn"),
+        ("Linhas ESPN", str(len(filtered_team_stats)), "good" if len(filtered_team_stats) else "warn"),
+        ("Histórico", str(filters["side"]), "good"),
+        ("Busca", str(filters["query"]) or "inativa", "good" if not str(filters["query"]) else "warn"),
     ]
     render_carbon_columns(
-        team_stats,
+        filtered_team_stats,
         sidebar_counts,
         legend_items,
-        generic_detail_items(team_stats, "Linhas ESPN", odds_stale_count),
+        detail_items,
         "Histórico mandante/visitante com Jogo 1 a Jogo 10, Média, Resultado, Competição, Adversário e todas as métricas atuais.",
         lambda: render_day_expanders(
-            matches,
-            lambda _date, day_matches: render_team_statistics_tab(day_matches, team_stats),
+            filtered_matches,
+            lambda _date, day_matches: render_team_statistics_tab(day_matches, filtered_team_stats),
             "target_date",
             "Sem jogos para a data.",
+            days_for_filter(str(filters["day"])),
         ),
+        status_items,
+        "Diagnóstico das estatísticas de times após recorte de data, time, fonte, lado mandante/visitante e busca.",
     )
 
 elif active_tab == "Estatísticas jogadores":
     matches = load_matches()
     lineups = load_lineups()
     player_stats = load_player_stats()
+    filters = render_player_filter_controls(active_tab, matches, lineups, player_stats)
+    filtered_matches, filtered_lineups, filtered_player_stats = apply_player_filters(matches, lineups, player_stats, filters)
+    status_items = generic_filter_status(filters, len(filtered_lineups), len(lineups))
+    render_filterbar(active_tab, status_items[:4])
     sidebar_counts = {
         tab_options[0]: palpites_count,
         tab_options[1]: palpites_count,
-        tab_options[2]: len(matches),
-        tab_options[3]: len(lineups),
+        tab_options[2]: len(filtered_matches),
+        tab_options[3]: len(filtered_lineups),
     }
-    starters = int(lineups["starter"].astype(bool).sum()) if not lineups.empty and "starter" in lineups.columns else 0
-    bench = max(0, len(lineups) - starters)
+    starters = int(filtered_lineups["starter"].apply(bool_from_db).sum()) if not filtered_lineups.empty and "starter" in filtered_lineups.columns else 0
+    bench = max(0, len(filtered_lineups) - starters)
     legend_items = [
-        ("Jogadores", str(len(lineups)), "lineups"),
-        ("Stats", str(len(player_stats)), "linhas jogador"),
+        ("Jogadores", str(len(filtered_lineups)), "lineups filtradas"),
+        ("Stats", str(len(filtered_player_stats)), "linhas jogador"),
         ("Titulares", str(starters), "estado filtrável"),
         ("Reservas", str(bench), "estado filtrável"),
         ("Mercados", str(len(PLAYER_STAT_CATEGORIES)), "histórico"),
     ]
+    detail_items = [
+        ("Partidas", str(len(filtered_matches)), "good" if len(filtered_matches) else "warn"),
+        ("Lineups", str(len(filtered_lineups)), "good" if len(filtered_lineups) else "warn"),
+        ("Stats jogador", str(len(filtered_player_stats)), "good" if len(filtered_player_stats) else "warn"),
+        ("Lineup", str(filters["status"]), "good"),
+        ("Busca", str(filters["query"]) or "inativa", "good" if not str(filters["query"]) else "warn"),
+    ]
     render_carbon_columns(
-        player_stats,
+        filtered_player_stats,
         sidebar_counts,
         legend_items,
-        generic_detail_items(player_stats, "Stats jogador", odds_stale_count),
+        detail_items,
         "Lineup, titulares, reservas, camisa, posição, mercados, histórico individual, jogos e Média no mesmo fluxo denso.",
         lambda: render_day_expanders(
-            matches,
-            lambda _date, day_matches: render_player_statistics_tab(day_matches, lineups, player_stats),
+            filtered_matches,
+            lambda _date, day_matches: render_player_statistics_tab(day_matches, filtered_lineups, filtered_player_stats),
             "target_date",
             "Sem jogos para a data.",
+            days_for_filter(str(filters["day"])),
         ),
+        status_items,
+        "Diagnóstico de jogadores após recorte por data, time, status de lineup, posição, fonte e busca.",
     )

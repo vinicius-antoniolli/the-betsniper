@@ -255,6 +255,7 @@ def render_carbon_theme_css(toolbar_unlocked: bool) -> None:
 
         .carbon-hero,
         .carbon-card,
+        .st-key-carbon_filter_panel,
         .st-key-carbon_left_panel,
         .st-key-carbon_main_panel,
         .st-key-carbon_right_panel,
@@ -392,11 +393,31 @@ def render_carbon_theme_css(toolbar_unlocked: bool) -> None:
           margin-top: 0.2rem;
         }}
 
+        .st-key-carbon_filter_panel,
         .st-key-carbon_left_panel,
         .st-key-carbon_main_panel,
         .st-key-carbon_right_panel,
         .st-key-carbon_nav_panel {{
           padding: 0.85rem;
+        }}
+
+        .st-key-carbon_filter_panel {{
+          margin-bottom: 0.85rem;
+        }}
+
+        .st-key-carbon_filter_panel [data-testid="stWidgetLabel"] p {{
+          color: var(--carbon-muted) !important;
+          font-size: 0.76rem;
+          font-weight: 800;
+          letter-spacing: 0.02em;
+        }}
+
+        .st-key-carbon_filter_panel div[data-baseweb="select"] > div,
+        .st-key-carbon_filter_panel input {{
+          background-color: var(--carbon-panel-2) !important;
+          border-color: var(--carbon-line-strong) !important;
+          border-radius: 7px !important;
+          color: var(--carbon-text) !important;
         }}
 
         .carbon-panel-kicker {{
@@ -603,11 +624,12 @@ def render_carbon_theme_css(toolbar_unlocked: bool) -> None:
         }}
 
         @media (max-width: 1200px) {{
-          .carbon-hero,
-          .carbon-filterbar,
-          .carbon-legend {{
-            grid-template-columns: 1fr;
-          }}
+        .carbon-hero,
+        .st-key-carbon_filter_panel,
+        .carbon-filterbar,
+        .carbon-legend {{
+          grid-template-columns: 1fr;
+        }}
 
           .carbon-metrics {{
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -631,8 +653,8 @@ def render_header(
     html = f"""
     <section class="carbon-hero">
       <div>
-        <div class="carbon-kicker"><span class="carbon-dot"></span>Carbon Exchange | Front-end ativo</div>
-        <div class="carbon-title">Data Grid Pro - {escape(tab_display_label(active_tab))}</div>
+        <div class="carbon-kicker"><span class="carbon-dot"></span>Carbon Exchange | Operacao ao vivo</div>
+        <div class="carbon-title">Betsniper Exchange - {escape(tab_display_label(active_tab))}</div>
         <div class="carbon-summary">
           Interface densa para odds, scores, mercados, motivos, estatisticas e publicacao X.
           A camada visual foi trocada; a coleta, o scoring e as integracoes continuam nas funcoes existentes.
@@ -655,28 +677,21 @@ def render_header(
     st.markdown(html, unsafe_allow_html=True)
 
 
-def render_filterbar(active_tab: str) -> None:
-    if "jogadores" in active_tab:
-        type_filter = "Tipo: Jogador"
-        market_filter = "Mercado: props + historico"
-    elif "Time" in active_tab:
-        type_filter = "Tipo: Times"
-        market_filter = "Grupo: historico ESPN"
-    elif active_tab == "Palpites":
-        type_filter = "Tipo: Jogo + Time + Jogador"
-        market_filter = "Mercado: todos"
-    else:
-        type_filter = "Tipo: todos"
-        market_filter = "Mercado: Score >= 75"
+def render_filterbar(active_tab: str, items: Iterable[tuple[str, str]] | None = None) -> None:
+    filter_items = list(items or [])
+    if not filter_items:
+        filter_items = [
+            ("Fluxo", tab_display_label(active_tab)),
+            ("Dados", "sem recorte adicional"),
+            ("Score", "faixa completa"),
+            ("Busca", "inativa"),
+        ]
+    cards = "".join(
+        f'<div class="carbon-filter"><b>{escape(label)}</b><br>{escape(value)}</div>'
+        for label, value in filter_items
+    )
     st.markdown(
-        f"""
-        <section class="carbon-filterbar">
-          <div class="carbon-filter">Data: Hoje + Amanha</div>
-          <div class="carbon-filter">{escape(type_filter)}</div>
-          <div class="carbon-filter">{escape(market_filter)}</div>
-          <div class="carbon-filter">Busca: use ordenacao, expansores e tabelas atuais</div>
-        </section>
-        """,
+        f'<section class="carbon-filterbar">{cards}</section>',
         unsafe_allow_html=True,
     )
 
@@ -694,7 +709,12 @@ def render_legend(items: Iterable[tuple[str, str, str]]) -> None:
     st.markdown(f'<section class="carbon-legend">{"".join(cards)}</section>', unsafe_allow_html=True)
 
 
-def render_sidebar(active_tab: str, counts: dict[str, int], odds_stale: int) -> None:
+def render_sidebar(
+    active_tab: str,
+    counts: dict[str, int],
+    odds_stale: int,
+    state_items: Iterable[tuple[str, str]] | None = None,
+) -> None:
     presets = []
     for tab, count in counts.items():
         active = " active" if tab == active_tab else ""
@@ -705,24 +725,35 @@ def render_sidebar(active_tab: str, counts: dict[str, int], odds_stale: int) -> 
             "</div>"
         )
     stale_text = f"{odds_stale} odds stale" if odds_stale else "odds frescas"
+    states = list(state_items or [])
+    if not states:
+        states = [
+            ("Cobertura", "Hoje + Amanha"),
+            ("Odds", stale_text),
+            ("Dados vazios", "N/D preservado nas tabelas"),
+            ("Publicacao X", "controles originais mantidos"),
+        ]
+    state_html = "".join(
+        f'<div class="carbon-state"><b>{escape(label)}</b>{escape(value)}</div>'
+        for label, value in states
+    )
     st.markdown(
         f"""
-        <div class="carbon-panel-kicker">Abas refatoradas</div>
-        <div class="carbon-panel-title">Presets</div>
+        <div class="carbon-panel-kicker">Navegacao operacional</div>
+        <div class="carbon-panel-title">Fluxos e volume</div>
         <div class="carbon-presets">{"".join(presets)}</div>
-        <div class="carbon-panel-kicker" style="margin-top:1rem">Estados</div>
-        <div class="carbon-state-list">
-          <div class="carbon-state"><b>Hoje/Amanha</b>expansores conectados ao filtro de data atual</div>
-          <div class="carbon-state"><b>{escape(stale_text)}</b>mesma regra ODDS_STALE_AFTER_HOURS</div>
-          <div class="carbon-state"><b>N/D preservado</b>sem odds, scores ou historico nao sao descartados</div>
-          <div class="carbon-state"><b>X</b>login, senha, publicar todas e publicar individual</div>
-        </div>
+        <div class="carbon-panel-kicker" style="margin-top:1rem">Filtro aplicado</div>
+        <div class="carbon-state-list">{state_html}</div>
         """,
         unsafe_allow_html=True,
     )
 
 
-def render_detail_panel(active_tab: str, items: Iterable[tuple[str, str, str]]) -> None:
+def render_detail_panel(
+    active_tab: str,
+    items: Iterable[tuple[str, str, str]],
+    description: str | None = None,
+) -> None:
     rows = []
     for label, value, kind in items:
         safe_kind = "good" if kind == "good" else "warn" if kind == "warn" else "bad" if kind == "bad" else ""
@@ -734,9 +765,9 @@ def render_detail_panel(active_tab: str, items: Iterable[tuple[str, str, str]]) 
         )
     st.markdown(
         f"""
-        <div class="carbon-panel-kicker">Detalhe lateral</div>
+        <div class="carbon-panel-kicker">Diagnostico do fluxo</div>
         <div class="carbon-panel-title">{escape(tab_display_label(active_tab))}</div>
-        <div class="carbon-panel-copy">Motivos, estatisticas, X e diagnostico continuam acessiveis no fluxo atual.</div>
+        <div class="carbon-panel-copy">{escape(description or "Resumo operacional calculado a partir dos dados atualmente filtrados.")}</div>
         <div class="carbon-state-list">{"".join(rows)}</div>
         """,
         unsafe_allow_html=True,
@@ -746,7 +777,7 @@ def render_detail_panel(active_tab: str, items: Iterable[tuple[str, str, str]]) 
 def render_main_heading(active_tab: str, summary: str) -> None:
     st.markdown(
         f"""
-        <div class="carbon-panel-kicker">Grid mestre</div>
+        <div class="carbon-panel-kicker">Tabela operacional</div>
         <div class="carbon-panel-title">{escape(tab_display_label(active_tab))}</div>
         <div class="carbon-panel-copy">{escape(summary)}</div>
         """,
@@ -778,14 +809,5 @@ def best_bet_detail_items(rows: pd.DataFrame, x_unlocked: bool, odds_stale: int)
         ("Times", _fmt_int(groups.get("Time", 0)), "good"),
         ("Jogadores", _fmt_int(groups.get("Jogador", 0)), "good"),
         ("Publicacao X", "liberada" if x_unlocked else "bloqueada", "good" if x_unlocked else "warn"),
-        ("Odds stale", _fmt_int(odds_stale), "warn" if odds_stale else "good"),
-    ]
-
-
-def generic_detail_items(rows: pd.DataFrame, label: str, odds_stale: int = 0) -> list[tuple[str, str, str]]:
-    return [
-        (label, _fmt_int(_safe_count(rows)), "good" if _safe_count(rows) else "warn"),
-        ("Hoje/Amanha", "ativo", "good"),
-        ("Estados vazios", "preservados", "good"),
         ("Odds stale", _fmt_int(odds_stale), "warn" if odds_stale else "good"),
     ]
